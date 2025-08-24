@@ -505,6 +505,7 @@ async function startServer() {
       logger.info(`⚡ Access Tokens: JWT with ${process.env.JWT_EXPIRE || '15m'} expiry`);
       logger.info(`🍪 Cookies: ${process.env.NODE_ENV === 'production' ? 'Secure' : 'Development'} mode`);
     });
+    
 
     // Set up session cleanup interval (every hour)
     setInterval(async () => {
