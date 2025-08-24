@@ -1,0 +1,5 @@
+{
+    "watch": ["**/*.js", "**/*.json"],
+    "script": "node index.js",
+    "ext": "js json"
+}
