@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, TrendingUp, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { CreditCard, TrendingUp, ArrowUpRight } from 'lucide-react';
 
 export const Transactions: React.FC = () => {
   return (

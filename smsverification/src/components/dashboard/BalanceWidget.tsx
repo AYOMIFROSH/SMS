@@ -1,6 +1,6 @@
 // src/components/dashboard/BalanceWidget.tsx
 import React from 'react';
-import { Wallet, TrendingUp, TrendingDown } from 'lucide-react';
+import { Wallet, TrendingUp } from 'lucide-react';
 
 interface BalanceWidgetProps {
   balance: number;

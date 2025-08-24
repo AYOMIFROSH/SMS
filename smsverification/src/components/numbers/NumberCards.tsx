@@ -10,7 +10,6 @@ import {
   X, 
   CheckCircle,
   AlertCircle,
-  Phone
 } from 'lucide-react';
 import { NumberPurchase } from '@/types';
 import toast from 'react-hot-toast';

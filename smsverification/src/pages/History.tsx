@@ -5,7 +5,6 @@ import { fetchNumberHistory } from '@/store/slices/numbersSlice';
 import { format } from 'date-fns';
 import { 
   Search, 
-  Filter, 
   Download, 
   Calendar,
   CheckCircle,

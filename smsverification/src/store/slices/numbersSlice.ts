@@ -314,7 +314,7 @@ const numbersSlice = createSlice({
         state.error = null;
         console.log('⏳ Purchase: Loading started');
       })
-      .addCase(purchaseNumber.fulfilled, (state, action) => {
+      .addCase(purchaseNumber.fulfilled, (state) => {
         state.purchasing = false;
         state.error = null;
         console.log('✅ Purchase: Completed successfully');
