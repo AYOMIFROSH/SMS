@@ -7,7 +7,11 @@ export default {
   theme: {
     extend: {
       screens: {
-        'xs': '475px', // Extra small breakpoint for very small mobile screens
+        'xs': '475px',
+        // More conservative lg breakpoint for better Edge compatibility
+        'lg': '1000px',
+        // Custom breakpoint specifically for dashboard grid
+        'dashboard': '1200px',
       },
       colors: {
         primary: {

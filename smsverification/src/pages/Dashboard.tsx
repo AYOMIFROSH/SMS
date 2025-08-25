@@ -69,16 +69,16 @@ const Dashboard: React.FC = () => {
       <StatsCards stats={stats} />
 
       {/* Content Grid - Responsive layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
-        {/* Left Column - Recent Activity (takes full width on mobile/tablet) */}
-        <div className="xl:col-span-2 order-2 xl:order-1">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* Left Column - Recent Activity (takes 3/4 width on xl screens) */}
+        <div className="lg:col-span-2 order-2 lg:order-1">
           <RecentActivity activity={activity} loading={loading} />
         </div>
 
-        {/* Right Column - Sidebar widgets */}
-        <div className="space-y-4 sm:space-y-6 order-1 xl:order-2">
-          {/* Balance Widget - Only show on mobile/tablet, hidden on desktop if balance in header */}
-          <div className="block xl:hidden">
+        {/* Right Column - Sidebar widgets (takes 1/4 width on xl screens) */}
+        <div className="lg:col-span-1 space-y-4 sm:space-y-6 order-1 lg:order-2">
+          {/* Balance Widget - Only show on mobile/tablet */}
+          <div className="block lg:hidden">
             <BalanceWidget balance={stats?.balance || 0} />
           </div>
           

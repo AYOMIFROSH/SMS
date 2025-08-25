@@ -65,9 +65,9 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
               )}
             </button>
 
-            {/* Balance - Hidden on very small screens */}
-            <div className="hidden xs:block bg-primary-50 px-3 py-2 rounded-lg">
-              <span className="text-sm text-primary-600 font-medium">
+            {/* Balance - Responsive display */}
+            <div className="hidden sm:block bg-primary-50 px-3 py-2 rounded-lg">
+              <span className="text-sm text-primary-600 font-medium whitespace-nowrap">
                 Balance: ${stats?.balance?.toFixed(2) || '0.00'}
               </span>
             </div>
@@ -75,8 +75,8 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
 
           {/* Right side - Notifications + User menu */}
           <div className="flex items-center space-x-2 sm:space-x-4">
-            {/* Balance for very small screens */}
-            <div className="xs:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium">
+            {/* Balance for small screens - compact version */}
+            <div className="sm:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium whitespace-nowrap">
               ${stats?.balance?.toFixed(2) || '0.00'}
             </div>
 

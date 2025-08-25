@@ -36,7 +36,7 @@ const QuickActions: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-10 sm:space-y-6">
       {/* Quick Actions */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4">
@@ -44,7 +44,7 @@ const QuickActions: React.FC = () => {
           <Zap className="h-5 w-5 text-yellow-500" />
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 sm:space-y-6">
           {actions.map((action) => {
             const Icon = action.icon;
             return (
@@ -100,10 +100,10 @@ const QuickActions: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-900 truncate">{service.name}</p>
-                  <p className="text-xs text-gray-500">From ${service.price}</p>
+                  <p className="text-xs text-gray-500 whitespace-nowrap">From ${service.price}</p>
                 </div>
               </div>
-              <button className="text-xs bg-primary-600 text-white px-2 sm:px-3 py-1 rounded-md hover:bg-primary-700 transition-colors font-medium flex-shrink-0 ml-2">
+              <button className="text-xs bg-primary-600 text-white px-2 sm:px-3 py-1 rounded-md hover:bg-primary-700 transition-colors font-medium flex-shrink-0 ml-2 whitespace-nowrap">
                 Buy
               </button>
             </div>

@@ -25,7 +25,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
       textColor: 'text-blue-600',
     },
     {
-      name: 'Today\'s Purchases',
+      name: "Today's Purchases",
       value: stats?.todayPurchases?.toString() || '0',
       icon: ShoppingBag,
       color: 'bg-purple-500',
@@ -50,15 +50,15 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Total Spent',
-      value: `$${stats?.totalSpent?.toFixed(2) || '0.00'}`,
+      value: `${stats?.totalSpent?.toFixed(2) || '0.00'}`,
       icon: DollarSign,
       color: 'bg-red-500',
       bgColor: 'bg-red-50',
       textColor: 'text-red-600',
     },
     {
-      name: 'This Month',
-      value: (stats as any)?.monthlyPurchases?.toString() || stats?.todayPurchases?.toString() || '0',
+      name: 'Today Spent',
+      value: `${stats?.todaySpent?.toFixed(2) || '0.00'}`,
       icon: Clock,
       color: 'bg-indigo-500',
       bgColor: 'bg-indigo-50',
@@ -67,7 +67,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 lg:gap-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-6">
       {cards.map((card) => {
         const Icon = card.icon;
         return (
@@ -76,13 +76,15 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
             className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6 hover:shadow-md transition-shadow"
           >
             <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">{card.name}</p>
-                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mt-1 truncate">
+              <div className="flex-1 min-w-0 pr-2">
+                <p className="text-xs sm:text-sm font-medium text-gray-600 leading-tight mb-1">
+                  {card.name}
+                </p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 leading-tight">
                   {card.value}
                 </p>
               </div>
-              <div className={`${card.bgColor} p-2 lg:p-3 rounded-lg flex-shrink-0 ml-2`}>
+              <div className={`${card.bgColor} p-2 lg:p-3 rounded-lg flex-shrink-0`}>
                 <Icon className={`h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 ${card.textColor}`} />
               </div>
             </div>
