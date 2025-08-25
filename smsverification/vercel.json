@@ -1,5 +1,16 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    { 
+      "source": "/api/:path*", 
+      "destination": "https://https://mysmsnumber.onrender.com/:path*" 
+    },
+    {
+      "source": "/ws/:path*",
+      "destination": "https://https://mysmsnumber.onrender.com/ws/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/"
+    }
   ]
 }
