@@ -80,7 +80,7 @@ const getCookieOptions = () => {
     return {
       httpOnly: true,
       secure: true, // Require HTTPS
-      sameSite: 'none', // Allow cross-origin
+      sameSite: 'lax', // Allow cross-origin
       path: '/',
       domain: process.env.COOKIE_DOMAIN
     };
