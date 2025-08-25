@@ -1,12 +1,12 @@
-// src/components/dashboard/StatsCards.tsx
+// src/components/dashboard/StatsCards.tsx - Optimized without balance redundancy
 import React from 'react';
 import { 
-  Wallet, 
   Smartphone, 
   ShoppingBag, 
   TrendingUp,
   Phone,
-  DollarSign
+  DollarSign,
+  Clock
 } from 'lucide-react';
 import { DashboardStats } from '@/types';
 
@@ -16,14 +16,6 @@ interface StatsCardsProps {
 
 const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
   const cards = [
-    {
-      name: 'Account Balance',
-      value: `$${stats?.balance?.toFixed(2) || '0.00'}`,
-      icon: Wallet,
-      color: 'bg-green-500',
-      bgColor: 'bg-green-50',
-      textColor: 'text-green-600',
-    },
     {
       name: 'Active Numbers',
       value: stats?.activeNumbers?.toString() || '0',
@@ -58,35 +50,40 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Total Spent',
-      value: `${stats?.totalSpent?.toFixed(2) || '0.00'}`,
+      value: `$${stats?.totalSpent?.toFixed(2) || '0.00'}`,
       icon: DollarSign,
       color: 'bg-red-500',
       bgColor: 'bg-red-50',
       textColor: 'text-red-600',
     },
+    {
+      name: 'This Month',
+      value: (stats as any)?.monthlyPurchases?.toString() || stats?.todayPurchases?.toString() || '0',
+      icon: Clock,
+      color: 'bg-indigo-500',
+      bgColor: 'bg-indigo-50',
+      textColor: 'text-indigo-600',
+    },
   ];
 
-  console.log('stats.totalSpent type:', typeof stats?.totalSpent, 'value:', stats?.totalSpent);
-
-
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 lg:gap-6">
       {cards.map((card) => {
         const Icon = card.icon;
         return (
           <div
             key={card.name}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow"
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4 lg:p-6 hover:shadow-md transition-shadow"
           >
             <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-600">{card.name}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">{card.name}</p>
+                <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mt-1 truncate">
                   {card.value}
                 </p>
               </div>
-              <div className={`${card.bgColor} p-3 rounded-lg`}>
-                <Icon className={`h-6 w-6 ${card.textColor}`} />
+              <div className={`${card.bgColor} p-2 lg:p-3 rounded-lg flex-shrink-0 ml-2`}>
+                <Icon className={`h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6 ${card.textColor}`} />
               </div>
             </div>
           </div>

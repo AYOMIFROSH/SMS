@@ -1,4 +1,4 @@
-// src/pages/Dashboard.tsx
+// src/pages/Dashboard.tsx - Optimized and responsive
 import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
@@ -45,12 +45,12 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header - Responsive */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-600">Welcome back! Here's your SMS verification overview.</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">Welcome back! Here's your SMS verification overview.</p>
         </div>
         <div className="flex space-x-3">
           <button 
@@ -58,27 +58,29 @@ const Dashboard: React.FC = () => {
               dispatch(fetchDashboardStats());
               dispatch(fetchActivity());
             }}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            className="px-3 py-2 sm:px-4 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
           >
             Refresh
           </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards - Responsive grid */}
       <StatsCards stats={stats} />
 
-      {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Recent Activity */}
-        <div className="lg:col-span-2">
+      {/* Content Grid - Responsive layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
+        {/* Left Column - Recent Activity (takes full width on mobile/tablet) */}
+        <div className="xl:col-span-2 order-2 xl:order-1">
           <RecentActivity activity={activity} loading={loading} />
         </div>
 
-        {/* Right Column */}
-        <div className="space-y-6">
-          {/* Balance Widget */}
-          <BalanceWidget balance={stats?.balance || 0} />
+        {/* Right Column - Sidebar widgets */}
+        <div className="space-y-4 sm:space-y-6 order-1 xl:order-2">
+          {/* Balance Widget - Only show on mobile/tablet, hidden on desktop if balance in header */}
+          <div className="block xl:hidden">
+            <BalanceWidget balance={stats?.balance || 0} />
+          </div>
           
           {/* Quick Actions */}
           <QuickActions />

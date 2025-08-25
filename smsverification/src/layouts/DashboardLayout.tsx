@@ -1,5 +1,5 @@
-// src/layouts/DashboardLayout.tsx - Updated to use useAuth hook
-import React, { useEffect } from 'react';
+// src/layouts/DashboardLayout.tsx - Updated with responsive sidebar state
+import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import useAuth from '@/hooks/useAuth';
 import Header from '@/components/common/Header';
@@ -9,6 +9,7 @@ const DashboardLayout: React.FC = () => {
   const { isAuthenticated, initialized, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     // Only redirect if initialization is complete and user is not authenticated
@@ -20,6 +21,23 @@ const DashboardLayout: React.FC = () => {
       });
     }
   }, [isAuthenticated, initialized, loading, navigate, location.pathname]);
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Handle window resize - close mobile sidebar on desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) { // lg breakpoint
+        setSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Show loading while authentication is being initialized
   if (!initialized || loading) {
@@ -40,12 +58,12 @@ const DashboardLayout: React.FC = () => {
   return (
     <div className="h-screen bg-gray-50 flex overflow-hidden">
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col overflow-hidden ml-64">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+      <div className="flex-1 flex flex-col overflow-hidden pl-0 lg:pl-64">
+        <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>

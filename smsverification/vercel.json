@@ -2,11 +2,11 @@
   "rewrites": [
     { 
       "source": "/api/:path*", 
-      "destination": "https://https://mysmsnumber.onrender.com/:path*" 
+      "destination": "https://mysmsnumber.onrender.com/:path*" 
     },
     {
       "source": "/ws/:path*",
-      "destination": "https://https://mysmsnumber.onrender.com/ws/:path*"
+      "destination": "https://mysmsnumber.onrender.com/ws/:path*"
     },
     {
       "source": "/(.*)",

@@ -6,6 +6,9 @@ export default {
   ],
   theme: {
     extend: {
+      screens: {
+        'xs': '475px', // Extra small breakpoint for very small mobile screens
+      },
       colors: {
         primary: {
           50: '#eff6ff',
@@ -23,6 +26,9 @@ export default {
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
+      zIndex: {
+        '60': '60',
+      }
     },
   },
   plugins: [],
