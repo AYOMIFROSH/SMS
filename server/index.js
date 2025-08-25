@@ -16,6 +16,7 @@ const webSocketService = require('./services/webhookService');
 // MUST initialize WS here
 const app = express();
 const server = http.createServer(app);
+app.use(cookieParser());
 
 // Trust proxy for accurate client IPs
 app.set('trust proxy', process.env.TRUST_PROXY || 1);
@@ -44,7 +45,6 @@ app.use(helmet({
 }));
 
 // Cookie parser - MUST be before routes
-app.use(cookieParser());
 
 // Enhanced CORS configuration
 const corsOptions = {
