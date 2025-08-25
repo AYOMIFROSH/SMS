@@ -47,42 +47,21 @@ app.use(helmet({
 // Cookie parser - MUST be before routes
 
 // Enhanced CORS configuration
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'http://localhost:5173',
-      'http://localhost:3000',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:3000',
-      'https://mysmsnumber.vercel.app'
-    ];
-
-    // Allow requests with no origin (mobile apps, etc.)
+    // allow non-browser clients (no origin) but for browser requests check exact origin
     if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
+    if (origin === FRONTEND_URL) return callback(null, true);
     logger.warn('CORS blocked origin:', origin);
     return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true, // Allow cookies
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With',
-    'X-Skip-Retry',
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'Cache-Control'
-  ],
-  exposedHeaders: [
-    'X-Total-Count',
-    'X-Page-Count'
-  ],
-  maxAge: 86400 // 24 hours
+  credentials: true,
+  methods: ['GET','POST','PUT','DELETE','OPTIONS','PATCH'],
+  allowedHeaders: ['Origin','X-Requested-With','Content-Type','Accept','Authorization','Cache-Control'],
+  exposedHeaders: ['X-Total-Count','X-Page-Count'],
+  maxAge: 86400
 };
 
 app.use(cors(corsOptions));

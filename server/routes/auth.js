@@ -80,7 +80,7 @@ const getCookieOptions = () => {
     return {
       httpOnly: true,
       secure: isProduction, // Require HTTPS
-      sameSite: 'lax', // Allow cross-origin
+      sameSite: 'none', // Allow cross-origin
       path: '/',
     };
   } else {
