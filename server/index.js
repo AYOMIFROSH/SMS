@@ -47,7 +47,7 @@ app.use(helmet({
 // Cookie parser - MUST be before routes
 
 // Enhanced CORS configuration
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const FRONTEND_URL = 'https://mysmsnumber.vercel.app' || process.env.Dev_Front_END_URL;
 
 const corsOptions = {
   origin: function (origin, callback) {
