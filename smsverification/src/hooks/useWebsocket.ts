@@ -1,4 +1,4 @@
-// src/hooks/useWebSocket.ts - Enhanced with better security and error handling
+// src/hooks/useWebSocket.ts - Fixed production URL handling
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '@/store/store';
@@ -61,21 +61,47 @@ const useWebSocket = (onMessage?: OnMessageCb, enabled = true) => {
       return;
     }
 
-   const accessToken = tokenManager.getAccessToken();
-if (!accessToken) {
-  console.log('❌ WebSocket: No access token available');
-  return;
-}
+    const accessToken = tokenManager.getAccessToken();
+    if (!accessToken) {
+      console.log('❌ WebSocket: No access token available');
+      return;
+    }
 
-    // Use secure WebSocket URL in production
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Remove port from host (if present) then attach configured WS port to avoid double-port issues
-    const hostNoPort = window.location.host.replace(/:\d+$/, '');
-    const wsPort = import.meta.env.VITE_WS_PORT || '5000';
-    const wsUrl = `${protocol}//${hostNoPort}:${wsPort}/ws?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(String(user.id))}`;
+    // Smart WebSocket URL construction for Render backend + Vercel frontend
+    let wsUrl: string;
+    
+    // Check if we're in production (frontend on Vercel)
+    const isProduction = window.location.host.includes('vercel.app') || 
+                        window.location.host.includes('netlify.app') || 
+                        !window.location.host.includes('localhost');
+
+    if (isProduction) {
+      // Production: Connect to Render server
+      const renderServerUrl = import.meta.env.VITE_RENDER_SERVER_URL || import.meta.env.VITE_API_BASE_URL;
+      if (!renderServerUrl) {
+        console.error('❌ WebSocket: VITE_RENDER_SERVER_URL or VITE_API_BASE_URL not configured');
+        setConnectionError('Server URL not configured');
+        return;
+      }
+      
+      // Convert HTTP/HTTPS URL to WebSocket URL
+      const serverUrl = renderServerUrl.replace(/^https?:\/\//, '');
+      const protocol = renderServerUrl.startsWith('https') ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${serverUrl}/ws?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(String(user.id))}`;
+    } else {
+      // Development: Connect to local server
+      const wsPort = import.meta.env.VITE_WS_PORT || '5000';
+      const protocol = 'ws:'; // Local development uses ws
+      wsUrl = `${protocol}//localhost:${wsPort}/ws?token=${encodeURIComponent(accessToken)}&userId=${encodeURIComponent(String(user.id))}`;
+    }
 
     try {
-      console.log('🔌 WebSocket: Attempting to connect...', { wsUrl });
+      console.log('🔌 WebSocket: Attempting to connect...', { 
+        wsUrl,
+        isProduction,
+        renderServerUrl: isProduction ? (import.meta.env.VITE_RENDER_SERVER_URL || import.meta.env.VITE_API_BASE_URL) : 'localhost',
+        frontendHost: window.location.host
+      });
       const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
 
