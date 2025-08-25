@@ -113,13 +113,7 @@ client.interceptors.response.use(
         timeout: originalRequest?.timeout
       });
       
-      if (duration > 60000) {
-        toast.error('Request timed out. Server may be starting up - please try again.', {
-          duration: 6000
-        });
-      } else {
-        toast.error('Request timed out. Please try again.');
-      }
+      // Let components handle timeout UI - no toast spam
     }
 
     if (error.response) {
@@ -229,7 +223,10 @@ client.interceptors.response.use(
       // Handle other status codes
       switch (status) {
         case 403:
-          toast.error('Access denied');
+          // Only toast for explicit user actions, not background requests
+          if (!originalRequest.url?.includes('/health') && !originalRequest.url?.includes('/stats')) {
+            toast.error('Access denied');
+          }
           break;
         case 429:
           {
@@ -238,17 +235,20 @@ client.interceptors.response.use(
             break;
           }
         case 500:
-          toast.error('Server error. Please try again later.');
+          // Only toast server errors for user-initiated actions
+          if (!originalRequest.url?.includes('/health') && !originalRequest.url?.includes('/stats')) {
+            toast.error('Server error. Please try again later.');
+          }
           break;
         default:
-          // Only show error toast for non-401 errors or if not an initialization request
+          // No default toast - let components handle their own error UI
       }
     } else if (error.request) {
       console.error('❌ Network error:', error.request);
-      toast.error('Network error. Please check your connection.');
+      // Let components handle network error UI - no generic toast
     } else {
       console.error('❌ Request setup error:', error.message);
-      toast.error('An unexpected error occurred.');
+      // Let components handle setup error UI - no generic toast
     }
 
     return Promise.reject(error);
@@ -272,7 +272,7 @@ export const checkServerHealth = async (): Promise<{ healthy: boolean; duration:
     console.log(`✅ Server healthy (${duration}ms)${coldStart ? ' - was cold' : ''}`, response.data);
     
     if (coldStart) {
-      toast.success('Ping', { icon: '🚀', duration: 3000 });
+      toast.success('Server is ready!', { icon: '🚀', duration: 3000 });
     }
     
     return { healthy: true, duration, coldStart };
