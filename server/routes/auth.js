@@ -79,7 +79,7 @@ const getCookieOptions = () => {
     // Production: Strict settings for HTTPS
     return {
       httpOnly: true,
-      secure: true, // Require HTTPS
+      secure: isProduction, // Require HTTPS
       sameSite: 'lax', // Allow cross-origin
       path: '/',
     };
