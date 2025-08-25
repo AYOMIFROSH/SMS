@@ -82,7 +82,7 @@ const getCookieOptions = () => {
       secure: true, // Require HTTPS
       sameSite: 'lax', // Allow cross-origin
       path: '/',
-      // domain: process.env.COOKIE_DOMAIN
+      domain: process.env.COOKIE_DOMAIN
     };
   } else {
     // Development: Relaxed settings for HTTP localhost
