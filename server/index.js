@@ -51,7 +51,6 @@ const FRONTEND_URL = 'https://mysmsnumber.vercel.app' || process.env.Dev_Front_E
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // allow non-browser clients (no origin) but for browser requests check exact origin
     if (!origin) return callback(null, true);
     if (origin === FRONTEND_URL) return callback(null, true);
     logger.warn('CORS blocked origin:', origin);
@@ -59,12 +58,21 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET','POST','PUT','DELETE','OPTIONS','PATCH'],
-  allowedHeaders: ['Origin','X-Requested-With','Content-Type','Accept','Authorization','Cache-Control'],
+  allowedHeaders: [
+    'Origin',
+    'X-Requested-With',
+    'Content-Type',
+    'Accept',
+    'Authorization',
+    'Cache-Control',
+    'x-skip-retry', // 👈 add this line
+  ],
   exposedHeaders: ['X-Total-Count','X-Page-Count'],
   maxAge: 86400
 };
 
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // 👈 handle preflight requests
 
 // Compression
 app.use(compression({
