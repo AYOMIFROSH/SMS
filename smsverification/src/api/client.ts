@@ -1,4 +1,4 @@
-// src/api/client.ts - Fixed for proper cookie-based refresh
+// src/api/client.ts - Enhanced with cold start handling (keeping existing structure)
 import axios, { type AxiosRequestHeaders } from 'axios';
 import toast from 'react-hot-toast';
 
@@ -33,14 +33,16 @@ const client = axios.create({
     'Content-Type': 'application/json',
   },
   withCredentials: true, // Essential for cookie-based auth
-  timeout: 30000,
+  timeout: 90000, // 🔧 Enhanced: Increased from 30s to 90s for Render cold starts
 });
 
-
-// Request interceptor - only add Authorization header
+// 🆕 Enhanced: Add request timing for cold start detection
 client.interceptors.request.use(
   (config) => {
     console.log(`📤 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+
+    // Add request start time for cold start detection
+    (config as any).requestStartTime = Date.now();
 
     // Ensure headers object exists (cast to AxiosRequestHeaders to satisfy TS)
     if (!config.headers) config.headers = {} as AxiosRequestHeaders;
@@ -58,19 +60,71 @@ client.interceptors.request.use(
   }
 );
 
-// Response interceptor - handle token refresh via cookies
+// 🔧 Enhanced: Response interceptor with cold start handling
 client.interceptors.response.use(
   (response) => {
-    console.log(`📥 API Response: ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`);
+    // Calculate request duration for cold start detection
+    const duration = Date.now() - (response.config as any).requestStartTime;
+    console.log(`📥 API Response: ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url} (${duration}ms)`);
+    
+    // Warn about potential cold start
+    if (duration > 30000) {
+      console.warn(`⚠️ Slow response detected (${duration}ms) - possible cold start`);
+    }
+    
     return response;
   },
   async (error) => {
     // cast to any to allow custom properties like _retry/skipRetry without TS noise
     const originalRequest: any = error?.config;
+    const duration = Date.now() - (originalRequest?.requestStartTime || Date.now());
+
+    // 🆕 Enhanced: Handle network errors (cold starts)
+    if (error.code === 'ERR_NETWORK' || error.code === 'ERR_CONNECTION_CLOSED') {
+      console.error(`❌ Network/Connection error (${duration}ms) - likely Render cold start:`, {
+        code: error.code,
+        message: error.message,
+        url: originalRequest?.url
+      });
+      
+      // Show user-friendly cold start message
+      if (!originalRequest?._coldStartRetry) {
+        toast.loading('Server is waking up, please wait...', { 
+          id: 'cold-start',
+          duration: 8000 
+        });
+        
+        // Retry once with even longer timeout
+        originalRequest._coldStartRetry = true;
+        originalRequest.timeout = 120000; // 2 minutes for retry
+        
+        console.log('🔄 Retrying with extended timeout for cold start...');
+        return client(originalRequest);
+      } else {
+        toast.dismiss('cold-start');
+        toast.error('Server connection failed. Please try again.', { duration: 5000 });
+      }
+    }
+
+    // 🆕 Enhanced: Handle timeout errors
+    if (error.code === 'ECONNABORTED' || error.code === 'ERR_TIMEOUT') {
+      console.error(`❌ Request timeout (${duration}ms):`, {
+        url: originalRequest?.url,
+        timeout: originalRequest?.timeout
+      });
+      
+      if (duration > 60000) {
+        toast.error('Request timed out. Server may be starting up - please try again.', {
+          duration: 6000
+        });
+      } else {
+        toast.error('Request timed out. Please try again.');
+      }
+    }
 
     if (error.response) {
       const { status, data } = error.response;
-      console.error(`❌ API Error: ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url}`, data);
+      console.error(`❌ API Error: ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`, data);
 
       // Defensive header access: originalRequest.headers may be undefined
       const headers = originalRequest?.headers || ({} as AxiosRequestHeaders);
@@ -118,7 +172,8 @@ client.interceptors.response.use(
 
           // Create a single refresh promise that all concurrent requests can share
           refreshPromise = client.post('/auth/refresh', undefined, {
-            headers: { 'X-Skip-Retry': 'true' } as unknown as AxiosRequestHeaders
+            headers: { 'X-Skip-Retry': 'true' } as unknown as AxiosRequestHeaders,
+            timeout: 90000 // 🔧 Enhanced: Longer timeout for refresh too
           });
           
           const response = await refreshPromise;
@@ -199,6 +254,45 @@ client.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// 🆕 Enhanced: Health check utility for cold start detection
+export const checkServerHealth = async (): Promise<{ healthy: boolean; duration: number; coldStart: boolean }> => {
+  try {
+    console.log('🏥 Checking server health...');
+    const startTime = Date.now();
+    
+    const response = await client.get('/health', {
+      timeout: 120000, // 2 minutes for health check
+      headers: { 'X-Skip-Retry': 'true' } as unknown as AxiosRequestHeaders
+    });
+    
+    const duration = Date.now() - startTime;
+    const coldStart = duration > 30000;
+    
+    console.log(`✅ Server healthy (${duration}ms)${coldStart ? ' - was cold' : ''}`, response.data);
+    
+    if (coldStart) {
+      toast.success('Ping', { icon: '🚀', duration: 3000 });
+    }
+    
+    return { healthy: true, duration, coldStart };
+  } catch (error: any) {
+    console.error('❌ Server health check failed:', error);
+    return { healthy: false, duration: 0, coldStart: false };
+  }
+};
+
+// 🆕 Enhanced: Warmup utility to prevent cold starts
+export const warmupServer = async (): Promise<boolean> => {
+  try {
+    console.log('🔥 Warming up server...');
+    await checkServerHealth();
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Server warmup failed:', error);
+    return false;
+  }
+};
 
 export default client;
 export { API_URL };
