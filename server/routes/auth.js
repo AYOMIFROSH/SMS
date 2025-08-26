@@ -1,19 +1,20 @@
-// routes/auth.js - FIXED: Cross-origin cookie handling for development
+// routes/auth.js - Enhanced with all security fixes
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { getExistingDbPool, getPool } = require('../Config/database');
 const { authenticateToken } = require('../middleware/auth');
 const sessionService = require('../services/sessionService');
 const logger = require('../utils/logger');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
+const { body, validationResult } = require('express-validator');
 
 const router = express.Router();
 
-// Rate limiting for auth endpoints
+// Enhanced rate limiter for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 attempts per window
+  max: 5, // 5 attempts
   message: {
     success: false,
     error: 'Too many authentication attempts, please try again later',
@@ -21,90 +22,120 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip,
-  handler: (req, res) => {
-    logger.warn('Auth rate limit exceeded:', { ip: req.ip, path: req.path });
-    res.status(429).json({
-      success: false,
-      error: 'Too many authentication attempts, please try again later',
-      code: 'RATE_LIMIT_EXCEEDED'
-    });
-  }
+  keyGenerator: (req) => {
+    // Use combination of IP and username for more accurate limiting
+    const username = req.body?.username || 'unknown';
+    return `${req.ip}:${username}`;
+  },
+  skipSuccessfulRequests: true
+});
+
+// Refresh rate limiter (more lenient)
+const refreshLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 10, // 10 attempts
+  skipSuccessfulRequests: true
 });
 
 // Input validation middleware
-const validateLogin = (req, res, next) => {
-  const { username, password } = req.body;
+const loginValidation = [
+  body('username')
+    .trim()
+    .isLength({ min: 3, max: 50 })
+    .matches(/^[a-zA-Z0-9._@-]+$/)
+    .withMessage('Invalid username format'),
+  body('password')
+    .isLength({ min: 6, max: 128 })
+    .withMessage('Invalid password format')
+];
 
-  if (!username || !password) {
-    return res.status(400).json({
-      success: false,
-      error: 'Username and password are required',
-      code: 'MISSING_CREDENTIALS'
-    });
-  }
-
-  if (typeof username !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid credential format',
-      code: 'INVALID_FORMAT'
-    });
-  }
-
-  if (username.length < 3 || username.length > 50) {
-    return res.status(400).json({
-      success: false,
-      error: 'Username must be between 3-50 characters',
-      code: 'INVALID_USERNAME_LENGTH'
-    });
-  }
-
-  if (password.length < 6 || password.length > 128) {
-    return res.status(400).json({
-      success: false,
-      error: 'Password must be between 6-128 characters',
-      code: 'INVALID_PASSWORD_LENGTH'
-    });
-  }
-
-  next();
-};
-
-// ✅ FIXED: Environment-aware cookie configuration
+// Helper function to get cookie options based on environment
 const getCookieOptions = () => {
   const isProduction = process.env.NODE_ENV === 'production';
   
-  if (isProduction) {
-    // Production: Strict settings for HTTPS
-    return {
-      httpOnly: true,
-      secure: isProduction, // Require HTTPS
-      sameSite: 'none', // Allow cross-origin
-      path: '/',
-    };
-  } else {
-    // Development: Relaxed settings for HTTP localhost
-    return {
-      httpOnly: true,
-      secure: false, // Allow HTTP
-      sameSite: 'lax', // More permissive for same-site
-      path: '/'
-      // No domain for localhost
-    };
-  }
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    path: '/',
+    domain: process.env.COOKIE_DOMAIN || undefined
+  };
 };
 
-// POST /api/auth/login - FIXED for cross-origin development
-router.post('/login', authLimiter, validateLogin, async (req, res) => {
-  const { username, password } = req.body;
-  const clientIP = req.ip || req.connection.remoteAddress;
-  const userAgent = req.headers['user-agent'] || 'Unknown';
+// Helper to set authentication cookies
+const setAuthCookies = (res, tokens) => {
+  const cookieOptions = getCookieOptions();
+  
+  // Session token (long-lived)
+  res.cookie('sessionToken', tokens.sessionToken, {
+    ...cookieOptions,
+    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+  });
+  
+  // Refresh token
+  res.cookie('refreshToken', tokens.refreshToken, {
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/api/auth/refresh' // Restrict to refresh endpoint
+  });
+  
+  // Access token (short-lived)
+  res.cookie('accessToken', tokens.accessToken, {
+    ...cookieOptions,
+    maxAge: 15 * 60 * 1000 // 15 minutes
+  });
+};
 
+// Clear all auth cookies
+const clearAuthCookies = (res) => {
+  const cookieOptions = getCookieOptions();
+  
+  res.clearCookie('sessionToken', cookieOptions);
+  res.clearCookie('refreshToken', { ...cookieOptions, path: '/api/auth/refresh' });
+  res.clearCookie('accessToken', cookieOptions);
+};
+
+// POST /api/auth/login
+router.post('/login', authLimiter, loginValidation, async (req, res) => {
   try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { username, password } = req.body;
+    const clientIP = req.ip || req.connection.remoteAddress;
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+
     logger.info('Login attempt:', { username, ip: clientIP });
 
-    // Find user in existing database
+    // Check for account lockout (implement Redis-based lockout tracking)
+    const { getRedisClient } = require('../Config/redis');
+    const redis = getRedisClient();
+    
+    if (redis && redis.isOpen) {
+      const lockoutKey = `lockout:${username}`;
+      const lockoutData = await redis.get(lockoutKey);
+      
+      if (lockoutData) {
+        const lockout = JSON.parse(lockoutData);
+        if (lockout.lockedUntil > Date.now()) {
+          const remainingTime = Math.ceil((lockout.lockedUntil - Date.now()) / 1000 / 60);
+          return res.status(423).json({
+            success: false,
+            error: `Account temporarily locked. Try again in ${remainingTime} minutes`,
+            code: 'ACCOUNT_LOCKED'
+          });
+        }
+      }
+    }
+
+    // Find user in database
     const existingPool = getExistingDbPool();
     const [users] = await existingPool.execute(
       `SELECT id, firstname, lastname, username, email, password, balance, status, last_login
@@ -115,6 +146,22 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
     );
 
     if (users.length === 0) {
+      // Track failed attempt
+      if (redis && redis.isOpen) {
+        const attemptKey = `attempts:${username}`;
+        const attempts = await redis.incr(attemptKey);
+        await redis.expire(attemptKey, 900); // 15 minutes
+        
+        if (attempts >= 5) {
+          // Lock account for 30 minutes after 5 failed attempts
+          const lockoutKey = `lockout:${username}`;
+          await redis.setEx(lockoutKey, 1800, JSON.stringify({
+            lockedUntil: Date.now() + (30 * 60 * 1000),
+            attempts: attempts
+          }));
+        }
+      }
+      
       logger.warn('Login failed - User not found:', { username, ip: clientIP });
       return res.status(401).json({
         success: false,
@@ -128,12 +175,33 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      logger.warn('Login failed - Invalid password:', { userId: user.id, username, ip: clientIP });
+      // Track failed attempt (same as above)
+      if (redis && redis.isOpen) {
+        const attemptKey = `attempts:${username}`;
+        const attempts = await redis.incr(attemptKey);
+        await redis.expire(attemptKey, 900);
+        
+        if (attempts >= 5) {
+          const lockoutKey = `lockout:${username}`;
+          await redis.setEx(lockoutKey, 1800, JSON.stringify({
+            lockedUntil: Date.now() + (30 * 60 * 1000),
+            attempts: attempts
+          }));
+        }
+      }
+      
+      logger.warn('Login failed - Invalid password:', { userId: user.id, ip: clientIP });
       return res.status(401).json({
         success: false,
         error: 'Invalid username or password',
         code: 'INVALID_CREDENTIALS'
       });
+    }
+
+    // Clear failed attempts on successful login
+    if (redis && redis.isOpen) {
+      await redis.del(`attempts:${username}`);
+      await redis.del(`lockout:${username}`);
     }
 
     // Update last login
@@ -145,7 +213,7 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
     // Ensure SMS account exists
     const pool = getPool();
     const [smsAccounts] = await pool.execute(
-      'SELECT id FROM sms_user_accounts WHERE user_id = ?',
+      'SELECT id, api_key FROM sms_user_accounts WHERE user_id = ?',
       [user.id]
     );
 
@@ -154,58 +222,38 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
         'INSERT INTO sms_user_accounts (user_id, balance) VALUES (?, ?)',
         [user.id, user.balance || 0.00]
       );
-      logger.info('Created SMS account:', { userId: user.id });
+      logger.info('Created SMS account for user:', { userId: user.id });
     }
 
     // Create session
     const session = await sessionService.createSession(user.id, clientIP, userAgent);
 
+    // Store refresh token in Redis for validation
+    if (redis && redis.isOpen) {
+      await redis.setEx(
+        `refresh_token:${user.id}`,
+        604800, // 7 days
+        session.refreshToken
+      );
+    }
+
+    // Set authentication cookies
+    setAuthCookies(res, session);
+
     // Log successful login
     await pool.execute(
-      `INSERT INTO api_logs (user_id, endpoint, method, status_code, ip_address, user_agent, request_data)
-       VALUES (?, '/api/auth/login', 'POST', 200, ?, ?, ?)`,
-      [
-        user.id,
-        clientIP,
-        userAgent,
-        JSON.stringify({ username, loginTime: new Date().toISOString() })
-      ]
+      `INSERT INTO api_logs (user_id, endpoint, method, status_code, ip_address, user_agent)
+       VALUES (?, '/api/auth/login', 'POST', 200, ?, ?)`,
+      [user.id, clientIP, userAgent]
     );
 
-    // ✅ FIXED: Use environment-aware cookie configuration
-    const cookieOptions = getCookieOptions();
-
-    // Session cookie (long-lived)
-    res.cookie('sessionToken', session.sessionToken, {
-      ...cookieOptions,
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    logger.info('Login successful:', { 
+      userId: user.id, 
+      username, 
+      sessionId: session.sessionId 
     });
 
-    // Refresh token cookie
-    res.cookie('refreshToken', session.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    });
-
-    // ✅ Also set access token as cookie for easier frontend handling
-    res.cookie('accessToken', session.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000 // 15 minutes (same as JWT expiry)
-    });
-
-    // ✅ Debug logging
-    logger.info('🍪 Cookies set:', {
-      environment: process.env.NODE_ENV,
-      cookieOptions,
-      tokensSet: {
-        sessionToken: !!session.sessionToken,
-        refreshToken: !!session.refreshToken,
-        accessToken: !!session.accessToken
-      }
-    });
-
-    logger.info('Login successful:', { userId: user.id, username, sessionId: session.sessionId });
-
+    // Send response
     res.json({
       success: true,
       message: 'Login successful',
@@ -226,7 +274,7 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
     });
 
   } catch (error) {
-    logger.error('Login error:', { error: error.message, username, ip: clientIP });
+    logger.error('Login error:', error);
     res.status(500).json({
       success: false,
       error: 'Login failed due to server error',
@@ -235,18 +283,12 @@ router.post('/login', authLimiter, validateLogin, async (req, res) => {
   }
 });
 
-// ✅ FIXED: Refresh endpoint with proper cookie handling
-router.post('/refresh', async (req, res) => {
+// POST /api/auth/refresh
+router.post('/refresh', refreshLimiter, async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
     const clientIP = req.ip || req.connection.remoteAddress;
     const userAgent = req.headers['user-agent'] || 'Unknown';
-
-    console.log("🔍 Refresh request:", { 
-      hasRefreshToken: !!refreshToken,
-      cookiesReceived: Object.keys(req.cookies || {}),
-      userAgent: userAgent.substring(0, 50) + '...'
-    });
 
     if (!refreshToken) {
       return res.status(401).json({
@@ -256,35 +298,55 @@ router.post('/refresh', async (req, res) => {
       });
     }
 
-    // Call the service to handle refresh
+    // Verify refresh token in Redis
+    const { getRedisClient } = require('../Config/redis');
+    const redis = getRedisClient();
+    
+    if (redis && redis.isOpen) {
+      // Find user ID associated with this refresh token
+      const keys = await redis.keys('refresh_token:*');
+      let userId = null;
+      
+      for (const key of keys) {
+        const storedToken = await redis.get(key);
+        if (storedToken === refreshToken) {
+          userId = key.split(':')[1];
+          break;
+        }
+      }
+      
+      if (!userId) {
+        clearAuthCookies(res);
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid refresh token',
+          code: 'INVALID_REFRESH_TOKEN'
+        });
+      }
+    }
+
+    // Refresh the access token
     const result = await sessionService.refreshAccessToken(refreshToken, clientIP, userAgent);
 
     if (!result || !result.success) {
-      logger.warn('❌ Token refresh failed:', result?.message || 'Unknown error');
-      
-      // Clear cookies on failure
-      const cookieOptions = getCookieOptions();
-      res.clearCookie('sessionToken', cookieOptions);
-      res.clearCookie('refreshToken', cookieOptions);
-      res.clearCookie('accessToken', cookieOptions);
-      
+      clearAuthCookies(res);
       return res.status(401).json({
         success: false,
-        error: result?.message || 'Refresh failed',
+        error: result?.message || 'Token refresh failed',
         code: 'REFRESH_FAILED'
       });
     }
 
-    // Fetch user from DB
-    const pool = getExistingDbPool();
-    const [users] = await pool.execute(
-      `SELECT id, username, email, firstname, lastname, balance, last_login as lastLogin
-       FROM users WHERE id = ? LIMIT 1`,
+    // Get user data
+    const existingPool = getExistingDbPool();
+    const [users] = await existingPool.execute(
+      `SELECT id, username, email, firstname, lastname, balance, last_login
+       FROM users WHERE id = ? AND status = 1`,
       [result.userId]
     );
 
-    if (!users.length) {
-      logger.warn(`⚠️ User not found for ID: ${result.userId}`);
+    if (users.length === 0) {
+      clearAuthCookies(res);
       return res.status(404).json({
         success: false,
         error: 'User not found',
@@ -294,14 +356,14 @@ router.post('/refresh', async (req, res) => {
 
     const user = users[0];
 
-    // ✅ Update access token cookie with new token
+    // Update access token cookie
     const cookieOptions = getCookieOptions();
     res.cookie('accessToken', result.accessToken, {
       ...cookieOptions,
       maxAge: 15 * 60 * 1000 // 15 minutes
     });
 
-    logger.info('✅ Token refreshed successfully:', { 
+    logger.info('Token refreshed successfully:', { 
       userId: result.userId, 
       sessionId: result.sessionId 
     });
@@ -309,66 +371,30 @@ router.post('/refresh', async (req, res) => {
     res.json({
       success: true,
       accessToken: result.accessToken,
-      user,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        firstname: user.firstname,
+        lastname: user.lastname,
+        balance: parseFloat(user.balance || 0),
+        lastLogin: user.last_login
+      },
       message: 'Token refreshed successfully'
     });
 
   } catch (error) {
-    logger.error('❌ Refresh token error:', error);
-
-    // Clear all cookies on error
-    const cookieOptions = getCookieOptions();
-    res.clearCookie('sessionToken', cookieOptions);
-    res.clearCookie('refreshToken', cookieOptions);
-    res.clearCookie('accessToken', cookieOptions);
-
+    logger.error('Refresh token error:', error);
+    clearAuthCookies(res);
     res.status(401).json({
       success: false,
-      error: 'Invalid or expired refresh token',
+      error: 'Token refresh failed',
       code: 'REFRESH_ERROR'
     });
   }
 });
 
-// Debug endpoint - Keep this temporarily
-router.get('/debug/cookies', (req, res) => {
-  const cookies = req.cookies;
-  const headers = req.headers;
-
-  console.log('🔍 Debug - Request cookies:', cookies);
-  console.log('🔍 Debug - Request headers:', {
-    authorization: headers.authorization,
-    cookie: headers.cookie,
-    'user-agent': headers['user-agent'],
-    origin: headers.origin,
-    host: headers.host
-  });
-
-  res.json({
-    success: true,
-    debug: {
-      environment: process.env.NODE_ENV,
-      cookieOptions: getCookieOptions(),
-      cookies: {
-        sessionToken: cookies?.sessionToken ? 'PRESENT' : 'MISSING',
-        refreshToken: cookies?.refreshToken ? 'PRESENT' : 'MISSING',
-        accessToken: cookies?.accessToken ? 'PRESENT' : 'MISSING',
-        all: cookies
-      },
-      headers: {
-        authorization: headers.authorization ? 'PRESENT' : 'MISSING',
-        cookie: headers.cookie ? 'PRESENT' : 'MISSING',
-        userAgent: headers['user-agent'],
-        origin: headers.origin,
-        host: headers.host
-      },
-      timestamp: new Date().toISOString(),
-      ip: req.ip
-    }
-  });
-});
-
-// GET /api/auth/me - Get current user info
+// GET /api/auth/me
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
@@ -404,16 +430,16 @@ router.get('/me', authenticateToken, async (req, res) => {
       },
       smsAccount: smsAccount[0] ? {
         balance: parseFloat(smsAccount[0].balance || 0),
-        total_spent: parseFloat(smsAccount[0].total_spent || 0),
-        total_numbers_purchased: smsAccount[0].total_numbers_purchased || 0,
-        account_status: smsAccount[0].account_status,
-        has_api_key: !!smsAccount[0].has_api_key,
-        created_at: smsAccount[0].sms_account_created
+        totalSpent: parseFloat(smsAccount[0].total_spent || 0),
+        totalNumbersPurchased: smsAccount[0].total_numbers_purchased || 0,
+        accountStatus: smsAccount[0].account_status,
+        hasApiKey: !!smsAccount[0].has_api_key,
+        createdAt: smsAccount[0].sms_account_created
       } : null,
       recentActivity: recentActivity[0] || {
-        recent_purchases: 0,
-        successful_purchases: 0,
-        week_spent: 0
+        recentPurchases: 0,
+        successfulPurchases: 0,
+        weekSpent: 0
       }
     });
 
@@ -427,7 +453,7 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/auth/logout - User logout
+// POST /api/auth/logout
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
     const sessionToken = req.user.sessionToken;
@@ -438,25 +464,25 @@ router.post('/logout', authenticateToken, async (req, res) => {
       await sessionService.revokeSession(sessionToken);
     }
 
+    // Clear refresh token from Redis
+    const { getRedisClient } = require('../Config/redis');
+    const redis = getRedisClient();
+    if (redis && redis.isOpen) {
+      await redis.del(`refresh_token:${userId}`);
+    }
+
     // Log logout
     const pool = getPool();
     await pool.execute(
       `INSERT INTO api_logs (user_id, endpoint, method, status_code, ip_address, user_agent)
        VALUES (?, '/api/auth/logout', 'POST', 200, ?, ?)`,
-      [
-        userId,
-        req.ip || req.connection.remoteAddress,
-        req.headers['user-agent'] || 'Unknown'
-      ]
+      [userId, req.ip, req.headers['user-agent']]
     );
 
-    // ✅ Clear cookies with proper options
-    const cookieOptions = getCookieOptions();
-    res.clearCookie('sessionToken', cookieOptions);
-    res.clearCookie('refreshToken', cookieOptions);
-    res.clearCookie('accessToken', cookieOptions);
+    // Clear cookies
+    clearAuthCookies(res);
 
-    logger.info('User logged out:', { userId, sessionToken });
+    logger.info('User logged out:', { userId });
 
     res.json({
       success: true,
@@ -465,13 +491,7 @@ router.post('/logout', authenticateToken, async (req, res) => {
 
   } catch (error) {
     logger.error('Logout error:', error);
-
-    // Still clear cookies and return success
-    const cookieOptions = getCookieOptions();
-    res.clearCookie('sessionToken', cookieOptions);
-    res.clearCookie('refreshToken', cookieOptions);
-    res.clearCookie('accessToken', cookieOptions);
-
+    clearAuthCookies(res);
     res.json({
       success: true,
       message: 'Logged out successfully'
@@ -479,21 +499,30 @@ router.post('/logout', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/auth/logout-all - Logout from all devices
+// POST /api/auth/logout-all
 router.post('/logout-all', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Revoke all user sessions
+    // Revoke all sessions
     await sessionService.revokeAllUserSessions(userId);
 
-    // Clear current cookies
-    const cookieOptions = getCookieOptions();
-    res.clearCookie('sessionToken', cookieOptions);
-    res.clearCookie('refreshToken', cookieOptions);
-    res.clearCookie('accessToken', cookieOptions);
+    // Clear all refresh tokens from Redis
+    const { getRedisClient } = require('../Config/redis');
+    const redis = getRedisClient();
+    if (redis && redis.isOpen) {
+      await redis.del(`refresh_token:${userId}`);
+      // Clear any other user-specific keys
+      const keys = await redis.keys(`user:${userId}:*`);
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    }
 
-    logger.info('All user sessions revoked:', { userId });
+    // Clear cookies
+    clearAuthCookies(res);
+
+    logger.info('All sessions revoked:', { userId });
 
     res.json({
       success: true,
@@ -510,7 +539,7 @@ router.post('/logout-all', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/auth/sessions - Get user's active sessions
+// GET /api/auth/sessions
 router.get('/sessions', authenticateToken, async (req, res) => {
   try {
     const sessions = await sessionService.getUserSessions(req.user.id);
@@ -519,12 +548,12 @@ router.get('/sessions', authenticateToken, async (req, res) => {
       success: true,
       sessions: sessions.map(session => ({
         id: session.id,
-        ip_address: session.ip_address,
-        user_agent: session.user_agent,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        expires_at: session.expires_at,
-        is_current: session.id === req.user.sessionId
+        ipAddress: session.ip_address,
+        userAgent: session.user_agent,
+        createdAt: session.created_at,
+        updatedAt: session.updated_at,
+        expiresAt: session.expires_at,
+        isCurrent: session.id === req.user.sessionId
       }))
     });
 
@@ -538,13 +567,13 @@ router.get('/sessions', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE /api/auth/sessions/:id - Revoke specific session
+// DELETE /api/auth/sessions/:id
 router.delete('/sessions/:id', authenticateToken, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id);
     const userId = req.user.id;
 
-    // Get session to verify ownership
+    // Verify session ownership
     const pool = getPool();
     const [sessions] = await pool.execute(
       'SELECT session_token FROM user_sessions WHERE id = ? AND user_id = ?',
@@ -577,7 +606,7 @@ router.delete('/sessions/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/auth/check - Check authentication status
+// GET /api/auth/check
 router.get('/check', authenticateToken, (req, res) => {
   res.json({
     success: true,
@@ -596,35 +625,13 @@ router.get('/check', authenticateToken, (req, res) => {
   });
 });
 
-// POST /api/auth/clear-cookies - Force clear all cookies (Keep for debugging)
-router.post('/clear-cookies', (req, res) => {
-  const cookieOptions = getCookieOptions();
-  
-  // Clear with current environment options
-  res.clearCookie('sessionToken', cookieOptions);
-  res.clearCookie('refreshToken', cookieOptions);
-  res.clearCookie('accessToken', cookieOptions);
-
-  // Also try clearing with different options as fallback
-  const fallbackOptions = [
-    { httpOnly: true, secure: false, sameSite: 'lax', path: '/' },
-    { httpOnly: true, secure: false, sameSite: 'strict', path: '/' },
-    { httpOnly: true, secure: true, sameSite: 'none', path: '/' },
-    { path: '/' }
-  ];
-
-  fallbackOptions.forEach(options => {
-    res.clearCookie('sessionToken', options);
-    res.clearCookie('refreshToken', options);
-    res.clearCookie('accessToken', options);
-  });
-
-  logger.info('🧹 All cookies cleared forcefully');
-
-  res.json({
-    success: true,
-    message: 'All cookies cleared successfully',
-    instruction: 'Please refresh the page and login again'
+// POST /api/auth/verify-2fa (if implementing 2FA)
+router.post('/verify-2fa', authLimiter, authenticateToken, async (req, res) => {
+  // Implement 2FA verification logic here
+  res.status(501).json({
+    success: false,
+    error: '2FA not yet implemented',
+    code: 'NOT_IMPLEMENTED'
   });
 });
 
