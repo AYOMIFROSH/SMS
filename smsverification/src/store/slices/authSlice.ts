@@ -46,7 +46,7 @@ export const login = createAsyncThunk<
 
 export const logout = createAsyncThunk<void, void, { rejectValue: string }>(
   'auth/logout',
-  async (_, { rejectWithValue }) => {
+  async (_, { }) => {
     try {
       await authApi.logout();
     } catch (error: any) {
@@ -269,7 +269,7 @@ const authSlice = createSlice({
         
         console.log('Logout completed in Redux');
       })
-      .addCase(logout.rejected, (state, action) => {
+      .addCase(logout.rejected, (state, ) => {
         // Even if logout API fails, clear local state
         state.loading = false;
         state.user = null;
@@ -292,7 +292,7 @@ const authSlice = createSlice({
         
         // Token manager already updated by the API call
       })
-      .addCase(refreshTokens.rejected, (state, action) => {
+      .addCase(refreshTokens.rejected, (state,) => {
         // On refresh failure, clear everything
         state.user = null;
         state.accessToken = null;
