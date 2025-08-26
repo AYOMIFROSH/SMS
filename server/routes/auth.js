@@ -50,21 +50,54 @@ const loginValidation = [
 ];
 
 // Helper function to get cookie options based on environment
-const getCookieOptions = () => {
+// Enhanced getCookieOptions function for iOS compatibility
+const getCookieOptions = (req) => {
   const isProduction = process.env.NODE_ENV === 'production';
+  const userAgent = req.headers['user-agent'] || '';
   
-  return {
+  // Detect iOS devices
+  const isIOS = /iPad|iPhone|iPod/.test(userAgent);
+  const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
+  const isChromeIOS = /CriOS/.test(userAgent);
+  
+  // Base cookie options
+  const baseOptions = {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
     domain: process.env.COOKIE_DOMAIN || undefined
   };
+
+  // iOS-specific cookie handling
+  if (isProduction && (isIOS || isSafari || isChromeIOS)) {
+    return {
+      ...baseOptions,
+      sameSite: 'none',
+      secure: true, // MUST be true for sameSite: 'none'
+      // Add partitioned attribute for iOS
+      partitioned: true
+    };
+  }
+  
+  // Development or desktop browsers
+  if (isProduction) {
+    return {
+      ...baseOptions,
+      sameSite: 'none',
+      secure: true
+    };
+  } else {
+    return {
+      ...baseOptions,
+      sameSite: 'lax',
+      secure: false
+    };
+  }
 };
 
-// Helper to set authentication cookies
-const setAuthCookies = (res, tokens) => {
-  const cookieOptions = getCookieOptions();
+// Updated setAuthCookies function
+const setAuthCookies = (res, tokens, req) => {
+  const cookieOptions = getCookieOptions(req);
   
   // Session token (long-lived)
   res.cookie('sessionToken', tokens.sessionToken, {
@@ -72,11 +105,11 @@ const setAuthCookies = (res, tokens) => {
     maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
   });
   
-  // Refresh token
+  // Refresh token - more restrictive path
   res.cookie('refreshToken', tokens.refreshToken, {
     ...cookieOptions,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    path: '/api/auth/refresh' // Restrict to refresh endpoint
+    path: '/api/auth/refresh'
   });
   
   // Access token (short-lived)
@@ -84,6 +117,16 @@ const setAuthCookies = (res, tokens) => {
     ...cookieOptions,
     maxAge: 15 * 60 * 1000 // 15 minutes
   });
+  
+  // iOS fallback - also send tokens in response headers
+  const userAgent = req.headers['user-agent'] || '';
+  if (/iPad|iPhone|iPod|CriOS|FxiOS/.test(userAgent)) {
+    res.set({
+      'X-Access-Token': tokens.accessToken,
+      'X-Session-Token': tokens.sessionToken,
+      'X-Refresh-Token': tokens.refreshToken
+    });
+  }
 };
 
 // Clear all auth cookies
