@@ -85,11 +85,12 @@ const sessionMiddleware = async () => {
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://mysmsnumber.vercel.app';
 const DEV_FRONTEND_URL = process.env.DEV_FRONTEND_URL || 'http://localhost:5173';
 
+// Enhanced CORS Configuration for iOS compatibility
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [FRONTEND_URL];
     
-    // Add development URL if in development mode
+    // Add development URLs
     if (process.env.NODE_ENV !== 'production') {
       allowedOrigins.push(DEV_FRONTEND_URL);
       allowedOrigins.push('http://localhost:3000');
@@ -106,7 +107,7 @@ const corsOptions = {
     logger.warn('CORS blocked origin:', origin);
     return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true,
+  credentials: true, // Essential for cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Origin',
@@ -117,10 +118,25 @@ const corsOptions = {
     'Cache-Control',
     'X-CSRF-Token',
     'x-skip-retry',
-    'x-skip-auth-interceptor'
+    'x-skip-auth-interceptor',
+    // iOS-specific headers
+    'X-Access-Token',
+    'X-Session-Token', 
+    'X-Refresh-Token'
   ],
-  exposedHeaders: ['X-Total-Count', 'X-Page-Count', 'X-CSRF-Token'],
-  maxAge: 86400
+  exposedHeaders: [
+    'X-Total-Count', 
+    'X-Page-Count', 
+    'X-CSRF-Token',
+    // Expose tokens for iOS fallback
+    'X-Access-Token',
+    'X-Session-Token',
+    'X-Refresh-Token'
+  ],
+  maxAge: 86400,
+  // iOS-specific CORS options
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
