@@ -6,9 +6,12 @@ const logger = require('../utils/logger');
 const { getRedisClient } = require('../Config/redis');
 
 // Enhanced token extraction with multiple fallbacks
+// Enhanced token extraction with iOS fallback support
 const extractToken = (req) => {
   let token = null;
   const source = { from: null };
+  const userAgent = req.headers['user-agent'] || '';
+  const isIOS = /iPad|iPhone|iPod|CriOS|FxiOS/.test(userAgent);
 
   // 1) Authorization header (preferred)
   const authHeader = req.headers.authorization || req.headers.Authorization || '';
@@ -17,26 +20,40 @@ const extractToken = (req) => {
     source.from = 'header';
   }
 
-  // 2) Cookies (fallback)
+  // 2) iOS-specific header fallback (for when cookies fail)
+  if (!token && isIOS) {
+    token = req.headers['x-access-token'] || 
+            req.headers['X-Access-Token'] ||
+            req.headers['x-session-token'] ||
+            req.headers['X-Session-Token'];
+    if (token) source.from = 'ios-header';
+  }
+
+  // 3) Cookies (may fail on iOS)
   if (!token && req.cookies) {
-    token = req.cookies.accessToken || req.cookies.sessionToken || null;
+    token = req.cookies.accessToken || 
+            req.cookies.sessionToken || 
+            req.cookies.refreshToken;
     if (token) source.from = 'cookie';
   }
 
-  // 3) Query parameter (development only)
+  // 4) Query parameter (development only)
   if (!token && process.env.NODE_ENV !== 'production' && req.query?.token) {
     token = req.query.token;
     source.from = 'query';
   }
 
-  // Debug logging in development
-  if (process.env.NODE_ENV === 'development') {
+  // Enhanced logging for iOS debugging
+  if (process.env.NODE_ENV === 'development' || isIOS) {
     logger.debug('Token extraction:', {
       hasAuthHeader: !!authHeader,
       hasCookies: !!req.cookies,
+      hasIOSHeaders: !!(req.headers['x-access-token'] || req.headers['x-session-token']),
       cookieKeys: req.cookies ? Object.keys(req.cookies) : [],
       tokenFound: !!token,
-      tokenSource: source.from
+      tokenSource: source.from,
+      userAgent: userAgent.substring(0, 100),
+      isIOS: isIOS
     });
   }
 
