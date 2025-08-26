@@ -97,7 +97,6 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
                 </div>
                 <div className="text-left hidden sm:block">
                   <div className="text-sm font-medium truncate max-w-24 lg:max-w-none">{user?.username}</div>
-                  <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
                 </div>
               </button>
 
@@ -107,7 +106,6 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
                   {/* Mobile user info */}
                   <div className="px-4 py-3 border-b border-gray-100 sm:hidden">
                     <div className="text-sm font-medium text-gray-900">{user?.username}</div>
-                    <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
                   </div>
                   
                   <div className="py-1">
