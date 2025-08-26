@@ -1,295 +1,218 @@
-// src/api/client.ts - Enhanced with cold start handling (keeping existing structure)
-import axios, { type AxiosRequestHeaders } from 'axios';
+// src/api/client.ts - Production-ready HTTP client with proper security
+import axios, { AxiosError } from 'axios';
+import type { AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// Only store access token for Authorization header
-let accessToken: string | null = null;
+// Centralized token manager with proper lifecycle
+class TokenManager {
+  private accessToken: string | null = null;
+  private refreshPromise: Promise<string | null> | null = null;
 
-// Prevent multiple concurrent refresh requests
-let refreshPromise: Promise<any> | null = null;
-
-export const tokenManager = {
-  setAccessToken: (token: string | null) => {
-    accessToken = token;
+  setAccessToken(token: string | null): void {
+    this.accessToken = token;
     console.log('🔧 Access token updated:', !!token);
-  },
+  }
 
-  getAccessToken: () => accessToken,
+  getAccessToken(): string | null {
+    return this.accessToken;
+  }
 
-  clearTokens: () => {
-    console.log('🗑️ Clearing access token from memory');
-    accessToken = null;
-    refreshPromise = null; // Clear refresh promise too
-  },
+  clearTokens(): void {
+    console.log('🗑️ Clearing all tokens from memory');
+    this.accessToken = null;
+    this.refreshPromise = null;
+  }
 
-  hasAccessToken: () => Boolean(accessToken)
-};
+  hasValidToken(): boolean {
+    return Boolean(this.accessToken);
+  }
 
+  // Prevent concurrent refresh attempts
+  async refreshToken(): Promise<string | null> {
+  
+    if (this.refreshPromise) {
+      console.log('🔄 Refresh already in progress, waiting...');
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.performRefresh();
+
+    try {
+      const result = await this.refreshPromise;
+      return result;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private async performRefresh(): Promise<string | null> {
+    try {
+      console.log('🔄 Performing token refresh via httpOnly cookies...');
+
+      const response = await axios.post(`${API_URL}/auth/refresh`, null, {
+        withCredentials: true,
+        timeout: 30000,
+        headers: {
+          'X-Skip-Auth-Interceptor': 'true'
+        }
+      });
+
+      if (response.data?.success && response.data?.accessToken) {
+        const newToken = response.data.accessToken;
+        this.setAccessToken(newToken);
+
+        // Emit token update event
+        window.dispatchEvent(new CustomEvent('auth:tokenUpdated', {
+          detail: { accessToken: newToken }
+        }));
+
+        return newToken;
+      }
+
+      throw new Error('Invalid refresh response');
+    } catch (error: any) {
+      console.error('❌ Token refresh failed:', error);
+
+      // Clear tokens on refresh failure
+      this.clearTokens();
+
+      // Emit logout event
+      window.dispatchEvent(new CustomEvent('auth:sessionExpired', {
+        detail: { reason: 'refresh_failed' }
+      }));
+
+      return null;
+    }
+  }
+}
+
+export const tokenManager = new TokenManager();
+
+// Enhanced axios client with proper security
 const client = axios.create({
   baseURL: API_URL,
+  timeout: 90000,
+  withCredentials: true, // Essential for httpOnly cookies
   headers: {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest', // CSRF protection
   },
-  withCredentials: true, // Essential for cookie-based auth
-  timeout: 90000, // 🔧 Enhanced: Increased from 30s to 90s for Render cold starts
 });
 
-// 🆕 Enhanced: Add request timing for cold start detection
+// Request interceptor
 client.interceptors.request.use(
   (config) => {
-    console.log(`📤 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    
+    const startTime = Date.now();
+    (config as any).metadata = { startTime };
 
-    // Add request start time for cold start detection
-    (config as any).requestStartTime = Date.now();
-
-    // Ensure headers object exists (cast to AxiosRequestHeaders to satisfy TS)
-    if (!config.headers) config.headers = {} as AxiosRequestHeaders;
+    console.log(`📤 ${config.method?.toUpperCase()} ${config.url}`);
 
     // Add Bearer token if available
-    if (accessToken) {
-      (config.headers as any).Authorization = `Bearer ${accessToken}`;
+    const token = tokenManager.getAccessToken();
+    if (token && !config.headers['X-Skip-Auth-Interceptor']) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
 
     return config;
   },
-  (error) => {
-    console.error('❌ Request interceptor error:', error);
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// 🔧 Enhanced: Response interceptor with cold start handling
-client.interceptors.response.use(
-  (response) => {
-    // Calculate request duration for cold start detection
-    const duration = Date.now() - (response.config as any).requestStartTime;
-    console.log(`📥 API Response: ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url} (${duration}ms)`);
-    
-    // Warn about potential cold start
-    if (duration > 30000) {
-      console.warn(`⚠️ Slow response detected (${duration}ms) - possible cold start`);
-    }
-    
-    return response;
-  },
-  async (error) => {
-    // cast to any to allow custom properties like _retry/skipRetry without TS noise
-    const originalRequest: any = error?.config;
-    const duration = Date.now() - (originalRequest?.requestStartTime || Date.now());
+// Response interceptor with simplified error handling
+client.interceptors.response.use((response) => {
+  const cfg = response.config as AxiosRequestConfig & { metadata?: { startTime: number } };
+  const duration = Date.now() - (cfg.metadata?.startTime ?? Date.now());
 
-    // 🆕 Enhanced: Handle network errors (cold starts)
-    if (error.code === 'ERR_NETWORK' || error.code === 'ERR_CONNECTION_CLOSED') {
-      console.error(`❌ Network/Connection error (${duration}ms) - likely Render cold start:`, {
-        code: error.code,
-        message: error.message,
-        url: originalRequest?.url
-      });
-      
-      // Show user-friendly cold start message
-      if (!originalRequest?._coldStartRetry) {
-        toast.loading('Server is waking up, please wait...', { 
-          id: 'cold-start',
-          duration: 8000 
-        });
-        
-        // Retry once with even longer timeout
-        originalRequest._coldStartRetry = true;
-        originalRequest.timeout = 120000; // 2 minutes for retry
-        
-        console.log('🔄 Retrying with extended timeout for cold start...');
-        return client(originalRequest);
-      } else {
-        toast.dismiss('cold-start');
-        toast.error('Server connection failed. Please try again.', { duration: 5000 });
+  if (duration > 30000) {
+    console.warn(`⚠️ Slow response (${duration}ms) - possible cold start`);
+  }
+
+  return response;
+},
+  async (error: AxiosError) => {
+    const originalRequest = error.config as AxiosRequestConfig & {
+      _retry?: boolean;
+      metadata?: { startTime: number };
+      headers: any;
+    };
+
+    const duration = originalRequest?.metadata?.startTime
+      ? Date.now() - originalRequest.metadata.startTime
+      : 0;
+
+    // Handle network errors (cold starts)
+    if (!error.response && (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED')) {
+      console.error(`❌ Network error (${duration}ms):`, error.message);
+
+      if (duration > 30000) {
+        toast.loading('Server is starting up, please wait...', { duration: 8000 });
       }
-    }
 
-    // 🆕 Enhanced: Handle timeout errors
-    if (error.code === 'ECONNABORTED' || error.code === 'ERR_TIMEOUT') {
-      console.error(`❌ Request timeout (${duration}ms):`, {
-        url: originalRequest?.url,
-        timeout: originalRequest?.timeout
-      });
-      
-      // Let components handle timeout UI - no toast spam
+      return Promise.reject(error);
     }
 
     if (error.response) {
-      const { status, data } = error.response;
-      console.error(`❌ API Error: ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`, data);
+      const { status } = error.response;
 
-      // Defensive header access: originalRequest.headers may be undefined
-      const headers = originalRequest?.headers || ({} as AxiosRequestHeaders);
+      console.error(`❌ ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`);
 
-      // CHECK: Skip retry logic for initialization requests
-      if (headers['X-Skip-Retry'] === 'true' || headers['x-skip-retry'] === 'true' || originalRequest.skipRetry === true) {
-        console.log('⏭️ Skipping retry for initialization request');
-        return Promise.reject(error);
-      }
+      // Handle 401 Unauthorized with token refresh
+      if (status === 401 &&
+        originalRequest &&
+        !originalRequest._retry &&
+        !originalRequest.headers['X-Skip-Auth-Interceptor'] &&
+        !originalRequest.url?.includes('/auth/')) {
 
-      // Prevent refresh attempts for auth endpoints themselves
-      if (originalRequest.url && (
-        originalRequest.url.includes('/auth/login') ||
-        originalRequest.url.includes('/auth/refresh') ||
-        originalRequest.url.includes('/auth/logout')
-      )) {
-        console.log('⏭️ Auth endpoint error - not attempting refresh:', originalRequest.url);
-        return Promise.reject(error);
-      }
-
-      // Token expired - attempt refresh using HTTP-only cookies
-      if (status === 401 && !originalRequest._retry) {
         originalRequest._retry = true;
 
         try {
-          // If there's already a refresh in progress, wait for it
-          if (refreshPromise) {
-            console.log('🔄 Refresh already in progress, waiting...');
-            await refreshPromise;
+          const newToken = await tokenManager.refreshToken();
 
-            // Use the refreshed token
-            if (accessToken) {
-              if (!originalRequest.headers) originalRequest.headers = {} as AxiosRequestHeaders;
-              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-              return client(originalRequest);
-            } else {
-              throw new Error('Refresh completed but no token available');
-            }
-          }
-
-          console.log('🔄 Starting token refresh via cookies...');
-
-          // ✅ FIXED: Remove localStorage dependency - cookies are sent automatically
-          console.log('🔍 Refresh request will use HTTP-only cookies automatically');
-
-          // Create a single refresh promise that all concurrent requests can share
-          refreshPromise = client.post('/auth/refresh', undefined, {
-            headers: { 'X-Skip-Retry': 'true' } as unknown as AxiosRequestHeaders,
-            timeout: 90000 // 🔧 Enhanced: Longer timeout for refresh too
-          });
-          
-          const response = await refreshPromise;
-
-          if (response.data?.success && response.data?.accessToken) {
-            const newAccessToken = response.data.accessToken;
-
-            // Update access token in memory
-            tokenManager.setAccessToken(newAccessToken);
-            console.log('✅ Token refresh successful');
-
-            // Emit event for app-wide token update
-            window.dispatchEvent(new CustomEvent('auth:tokensUpdated', {
-              detail: { accessToken: newAccessToken }
-            }));
-
-            // Retry the original request with new token
-            if (!originalRequest.headers) originalRequest.headers = {} as AxiosRequestHeaders;
-            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+          if (newToken) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
-          } else {
-            throw new Error('Refresh response invalid: ' + JSON.stringify(response.data));
           }
-
-        } catch (refreshError: any) {
-          console.error('❌ Token refresh failed:', refreshError);
-
-          // Log the actual refresh error details
-          if (refreshError.response) {
-            console.error('❌ Refresh error response:', {
-              status: refreshError.response.status,
-              data: refreshError.response.data,
-              headers: refreshError.response.headers
-            });
-          }
-
-          // Clear tokens and emit logout event
-          tokenManager.clearTokens();
-          window.dispatchEvent(new CustomEvent('auth:logout', {
-            detail: { 
-              reason: 'token_refresh_failed',
-              error: refreshError.message 
-            }
-          }));
-
-          return Promise.reject(refreshError);
-        } finally {
-          // Clear the refresh promise when done (success or failure)
-          refreshPromise = null;
+        } catch (refreshError) {
+          // Refresh failed, let the error propagate
+          console.error('❌ Refresh failed during 401 handling');
         }
       }
 
-      // Handle other status codes
+      // Handle other status codes without intrusive toasts
       switch (status) {
         case 403:
-          // Only toast for explicit user actions, not background requests
-          if (!originalRequest.url?.includes('/health') && !originalRequest.url?.includes('/stats')) {
-            toast.error('Access denied');
+          if (!originalRequest?.url?.includes('/health')) {
+            console.warn('🚫 Access forbidden');
           }
           break;
         case 429:
-          {
-            const retryAfter = error.response.headers['retry-after'];
-            toast.error(`Too many requests. Please wait ${retryAfter || '60'} seconds.`);
-            break;
-          }
+          const retryAfter = error.response.headers['retry-after'] || '60';
+          toast.error(`Rate limited. Wait ${retryAfter}s`, { duration: 5000 });
+          break;
         case 500:
-          // Only toast server errors for user-initiated actions
-          if (!originalRequest.url?.includes('/health') && !originalRequest.url?.includes('/stats')) {
-            toast.error('Server error. Please try again later.');
+          if (!originalRequest?.url?.includes('/health')) {
+            console.error('🔥 Server error occurred');
           }
           break;
-        default:
-          // No default toast - let components handle their own error UI
       }
-    } else if (error.request) {
-      console.error('❌ Network error:', error.request);
-      // Let components handle network error UI - no generic toast
-    } else {
-      console.error('❌ Request setup error:', error.message);
-      // Let components handle setup error UI - no generic toast
     }
 
     return Promise.reject(error);
   }
 );
 
-// 🆕 Enhanced: Health check utility for cold start detection
-export const checkServerHealth = async (): Promise<{ healthy: boolean; duration: number; coldStart: boolean }> => {
+// Health check utility
+export const healthCheck = async (): Promise<boolean> => {
   try {
-    console.log('🏥 Checking server health...');
-    const startTime = Date.now();
-    
     const response = await client.get('/health', {
-      timeout: 120000, // 2 minutes for health check
-      headers: { 'X-Skip-Retry': 'true' } as unknown as AxiosRequestHeaders
+      headers: { 'X-Skip-Auth-Interceptor': 'true' },
+      timeout: 30000
     });
-    
-    const duration = Date.now() - startTime;
-    const coldStart = duration > 30000;
-    
-    console.log(`✅ Server healthy (${duration}ms)${coldStart ? ' - was cold' : ''}`, response.data);
-    
-    if (coldStart) {
-      toast.success('Server is ready!', { icon: '🚀', duration: 3000 });
-    }
-    
-    return { healthy: true, duration, coldStart };
-  } catch (error: any) {
-    console.error('❌ Server health check failed:', error);
-    return { healthy: false, duration: 0, coldStart: false };
-  }
-};
-
-// 🆕 Enhanced: Warmup utility to prevent cold starts
-export const warmupServer = async (): Promise<boolean> => {
-  try {
-    console.log('🔥 Warming up server...');
-    await checkServerHealth();
-    return true;
-  } catch (error) {
-    console.warn('⚠️ Server warmup failed:', error);
+    return response.status === 200;
+  } catch {
     return false;
   }
 };

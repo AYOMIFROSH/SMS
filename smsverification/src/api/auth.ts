@@ -1,132 +1,197 @@
-// src/api/auth.ts - Fixed to prevent infinite initialization loop
+// src/api/auth.ts - Simplified and secure authentication API
 import client, { tokenManager } from './client';
 import { User } from '@/types';
 
-export interface LoginResponse {
+export interface AuthResponse {
   success: boolean;
+  message?: string;
+}
+
+export interface LoginResponse extends AuthResponse {
   accessToken: string;
   user: User;
 }
 
-export interface MeResponse {
-  success: boolean;
-  data: User;
-}
-
-export interface CheckResponse {
-  success: boolean;
-  authenticated: boolean;
+export interface MeResponse extends AuthResponse {
   user: User;
-  session: {
-    id: number;
-    token: string;
-  };
 }
 
-export interface RefreshResponse {
-  success: boolean;
-  accessToken: string;
-  message: string;
+export interface InitializeResponse {
+  user: User | null;
+  isAuthenticated: boolean;
 }
 
-// Track initialization to prevent multiple attempts
 let isInitializing = false;
 
 export const authApi = {
-  // Login - receive access token, cookies are set automatically by server
+  /**
+   * Login with credentials - server sets httpOnly cookies automatically
+   */
   login: async (username: string, password: string): Promise<LoginResponse> => {
-    console.log('🔐 Attempting login...');
+    console.log('🔐 Attempting login for:', username);
 
-    const response = await client.post('/auth/login', { username, password });
+    try {
+      const response = await client.post('/auth/login', { 
+        username, 
+        password 
+      });
 
-    if (response.data.success) {
-      console.log('✅ Login successful');
+      if (response.data.success) {
+        console.log('✅ Login successful');
+        
+        // Store access token in memory
+        tokenManager.setAccessToken(response.data.accessToken);
+        
+        return response.data;
+      }
       
-      // Store only access token in memory
-      tokenManager.setAccessToken(response.data.accessToken);
+      throw new Error(response.data.message || 'Login failed');
+    } catch (error: any) {
+      console.error('❌ Login failed:', error);
+      
+      if (error.response?.data?.code) {
+        const errorMap: Record<string, string> = {
+          'ACCOUNT_NOT_FOUND': 'Account not found with this username or email',
+          'INVALID_PASSWORD': 'Incorrect password provided',
+          'ACCOUNT_INACTIVE': 'Account is inactive. Contact support.',
+          'RATE_LIMIT_EXCEEDED': 'Too many attempts. Try again later.',
+          'TWO_FACTOR_REQUIRED': 'Two-factor authentication required',
+        };
+        
+        const message = errorMap[error.response.data.code] || error.response.data.message;
+        throw new Error(message);
+      }
+      
+      throw new Error(error.response?.data?.message || error.message || 'Login failed');
     }
-
-    return response.data;
   },
 
-  // Logout - server clears cookies
+  /**
+   * Logout - clears server cookies and local tokens
+   */
   logout: async (): Promise<void> => {
+    console.log('🔐 Initiating logout process...');
+    
     try {
-      console.log('🔐 Attempting logout...');
+      // Call server logout endpoint to clear httpOnly cookies
       await client.post('/auth/logout');
       console.log('✅ Server logout successful');
     } catch (error) {
-      console.warn('⚠️ Server logout failed, but continuing with cleanup:', error);
+      console.warn('⚠️ Server logout failed, continuing with cleanup:', error);
     } finally {
-      // Always clear local token
+      // Always clear local tokens regardless of server response
       tokenManager.clearTokens();
+      
+      // Clear axios default headers
+      delete client.defaults.headers.common['Authorization'];
+      
       console.log('✅ Local tokens cleared');
     }
   },
 
-  // Get current user information
-  me: async (): Promise<MeResponse> => {
-    console.log('👤 Fetching user info...');
+  /**
+   * Get current authenticated user
+   */
+  me: async (): Promise<User> => {
+    console.log('👤 Fetching current user...');
+    
     const response = await client.get('/auth/me');
-    return response.data;
+    
+    if (response.data.success) {
+      return response.data.user;
+    }
+    
+    throw new Error(response.data.message || 'Failed to get user info');
   },
 
-  // Check authentication status (if needed for debugging)
-  check: async (): Promise<CheckResponse> => {
-    console.log('🔍 Checking auth status...');
-    const response = await client.get('/auth/check');
-    return response.data;
-  },
-
-  // Initialize authentication from cookies (called on app start)
-  // replace existing initializeAuth implementation with this
-initializeAuth: async (): Promise<{ user: User | null; isAuthenticated: boolean }> => {
+  /**
+   * Initialize authentication from httpOnly cookies on app start
+   */
+  initializeAuth: async (): Promise<InitializeResponse> => {
   if (isInitializing) {
-    console.log('🔄 Authentication initialization already in progress...');
+    console.log('🔄 Auth initialization already in progress...');
     return { user: null, isAuthenticated: false };
   }
 
+  isInitializing = true;
+  console.log('🚀 Initializing authentication from cookies...');
+
   try {
-    isInitializing = true;
-    console.log('🚀 Initializing authentication from cookies (refresh-first)...');
+    // 1. Refresh token first
+    const newToken = await tokenManager.refreshToken();
 
-    // 1) Try refresh first (uses httpOnly refresh cookie)
-    try {
-      const refreshResp = await client.post('/auth/refresh', undefined, {
-        headers: { 'X-Skip-Retry': 'true' } 
-      });
-
-      if (refreshResp?.data?.success && refreshResp?.data?.accessToken) {
-        const newToken = refreshResp.data.accessToken;
-        tokenManager.setAccessToken(newToken);
-        client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-
-        // ✅ Return user directly from refresh response, no need to call /auth/me
-        if (refreshResp.data.user) {
-          console.log('✅ Auth initialized via refresh (user returned)');
-          return { user: refreshResp.data.user as User, isAuthenticated: true };
-        }
-
-        // If user was not returned, fallback to false because refresh didn't give full info
-        console.log('⚠️ Refresh returned no user object; treating as unauthenticated');
-        return { user: null, isAuthenticated: false };
-      } else {
-        console.log('ℹ️ Refresh completed but no accessToken returned; user not authenticated');
-        tokenManager.clearTokens();
-        return { user: null, isAuthenticated: false };
-      }
-    } catch (refreshErr: any) {
-      if (refreshErr?.response?.status === 401) {
-        console.log('ℹ️ Refresh returned 401 — user not authenticated');
-        tokenManager.clearTokens();
-        return { user: null, isAuthenticated: false };
-      }
-      console.warn('⚠️ Refresh request failed:', refreshErr?.message || refreshErr);
+    if (!newToken) {
+      console.log('ℹ️ No valid session found');
       return { user: null, isAuthenticated: false };
     }
+
+    // 2. Set token immediately
+    client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+    // 3. Authenticate right away, even before user data is ready
+    const result: InitializeResponse = { user: null, isAuthenticated: true };
+
+    // 4. Fetch user in background (don't block UI)
+    authApi.me()
+      .then((user) => {
+        result.user = user;
+        console.log('✅ User details loaded after auth init');
+      })
+      .catch((err) => {
+        console.warn('⚠️ Failed to load user details:', err.message);
+      });
+
+    return result;
+
+  } catch (error: any) {
+    console.warn('⚠️ Auth initialization error:', error.message);
+    tokenManager.clearTokens();
+    delete client.defaults.headers.common['Authorization'];
+    return { user: null, isAuthenticated: false };
+
   } finally {
     isInitializing = false;
   }
-}
+},
 
+
+  /**
+   * Refresh access token using httpOnly refresh cookie
+   */
+  refresh: async (): Promise<string | null> => {
+    try {
+      console.log('🔄 Refreshing access token...');
+      
+      const response = await client.post('/auth/refresh', null, {
+        headers: { 'X-Skip-Auth-Interceptor': 'true' }
+      });
+      
+      if (response.data?.success && response.data?.accessToken) {
+        const newToken = response.data.accessToken;
+        tokenManager.setAccessToken(newToken);
+        
+        console.log('✅ Token refresh successful');
+        return newToken;
+      }
+      
+      throw new Error('Invalid refresh response');
+      
+    } catch (error) {
+      console.error('❌ Token refresh failed:', error);
+      tokenManager.clearTokens();
+      return null;
+    }
+  },
+
+  /**
+   * Validate current session
+   */
+  validateSession: async (): Promise<boolean> => {
+    try {
+      await authApi.me();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 };

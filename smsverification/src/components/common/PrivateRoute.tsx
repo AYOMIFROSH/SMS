@@ -9,17 +9,17 @@ interface PrivateRouteProps {
 }
 
 const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
-  const { isAuthenticated, isLoading, initializationComplete } = useAuth();
+  const { isAuthenticated, isReady, initialized } = useAuth();
   const location = useLocation();
 
   console.log('🛡️ PrivateRoute check:', {
     isAuthenticated,
-    isLoading,
-    initializationComplete,
+    isReady,
+    initialized,
     pathname: location.pathname
   });
 
-  if (!initializationComplete || isLoading) {
+  if (!initialized) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
