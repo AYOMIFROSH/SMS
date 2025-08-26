@@ -127,7 +127,6 @@ export const authApi = {
 
     // 2. Set token immediately
     client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-
     // 3. Authenticate right away, even before user data is ready
     const result: InitializeResponse = { user: null, isAuthenticated: true };
 

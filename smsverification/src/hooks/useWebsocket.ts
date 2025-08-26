@@ -99,8 +99,7 @@ const useWebSocket = (
 
     if (isProduction) {
       const serverUrl = import.meta.env.VITE_RENDER_SERVER_URL ||
-        import.meta.env.VITE_API_BASE_URL ||
-        import.meta.env.VITE_API_URL;
+        import.meta.env.VITE_API_BASE_URL
 
       if (!serverUrl) {
         console.error('Production server URL not configured');
