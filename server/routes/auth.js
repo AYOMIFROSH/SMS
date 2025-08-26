@@ -51,15 +51,16 @@ const loginValidation = [
 
 // Helper function to get cookie options based on environment
 // Enhanced getCookieOptions function for iOS compatibility
-const getCookieOptions = (req) => {
+const getCookieOptions = (req = {}) => {
   const isProduction = process.env.NODE_ENV === 'production';
-  const userAgent = req.headers['user-agent'] || '';
-  
+  // safely read user-agent (req may be undefined or missing headers)
+  const userAgent = (req && req.headers && req.headers['user-agent']) || '';
+
   // Detect iOS devices
   const isIOS = /iPad|iPhone|iPod/.test(userAgent);
   const isSafari = /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
   const isChromeIOS = /CriOS/.test(userAgent);
-  
+
   // Base cookie options
   const baseOptions = {
     httpOnly: true,
@@ -78,8 +79,8 @@ const getCookieOptions = (req) => {
       partitioned: true
     };
   }
-  
-  // Development or desktop browsers
+
+  // Production (non-iOS) or development
   if (isProduction) {
     return {
       ...baseOptions,
@@ -95,31 +96,31 @@ const getCookieOptions = (req) => {
   }
 };
 
-// Updated setAuthCookies function
-const setAuthCookies = (res, tokens, req) => {
+// Updated setAuthCookies function (req optional, default to {})
+const setAuthCookies = (res, tokens, req = {}) => {
   const cookieOptions = getCookieOptions(req);
-  
+
   // Session token (long-lived)
   res.cookie('sessionToken', tokens.sessionToken, {
     ...cookieOptions,
     maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
   });
-  
+
   // Refresh token - more restrictive path
   res.cookie('refreshToken', tokens.refreshToken, {
     ...cookieOptions,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/api/auth/refresh'
   });
-  
+
   // Access token (short-lived)
   res.cookie('accessToken', tokens.accessToken, {
     ...cookieOptions,
     maxAge: 15 * 60 * 1000 // 15 minutes
   });
-  
+
   // iOS fallback - also send tokens in response headers
-  const userAgent = req.headers['user-agent'] || '';
+  const userAgent = (req && req.headers && req.headers['user-agent']) || '';
   if (/iPad|iPhone|iPod|CriOS|FxiOS/.test(userAgent)) {
     res.set({
       'X-Access-Token': tokens.accessToken,
@@ -129,10 +130,10 @@ const setAuthCookies = (res, tokens, req) => {
   }
 };
 
-// Clear all auth cookies
-const clearAuthCookies = (res) => {
-  const cookieOptions = getCookieOptions();
-  
+// Clear all auth cookies (req optional)
+const clearAuthCookies = (res, req = {}) => {
+  const cookieOptions = getCookieOptions(req);
+
   res.clearCookie('sessionToken', cookieOptions);
   res.clearCookie('refreshToken', { ...cookieOptions, path: '/api/auth/refresh' });
   res.clearCookie('accessToken', cookieOptions);
