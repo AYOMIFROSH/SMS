@@ -96,8 +96,8 @@ const AppContent: React.FC = () => {
 
 
   // Initialize WebSocket connection only when fully authenticated and ready
-  const ws = useWebSocket(undefined, true);
-const { isConnected: wsConnected, connectionError: wsError } = ws;
+const ws = useWebSocket(undefined, true) || {};
+const { isConnected: wsConnected = false, connectionError: wsError = null } = ws;
 const hasConnectionIssue = !wsConnected && Boolean(wsError);
 
 

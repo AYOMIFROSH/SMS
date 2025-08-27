@@ -3,7 +3,6 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { authApi } from '@/api/auth';
 import { tokenManager } from '@/api/client';
 import { User } from '@/types';
-import { persistor } from '../store';
 
 export interface AuthState {
   user: User | null;
@@ -51,12 +50,12 @@ export const logout = createAsyncThunk<void, void, { rejectValue: string }>(
     try {
       await authApi.logout();
     } finally {
-      persistor.purge();       // purge persisted state
-      dispatch(sessionExpired()); // clear auth slice
-      window.location.href = '/login'; // optional redirect
+      // Only update Redux state here
+      dispatch(sessionExpired());
     }
   }
 );
+
 
 export const initializeAuth = createAsyncThunk<
   { user: User | null; isAuthenticated: boolean },
@@ -117,17 +116,17 @@ const authSlice = createSlice({
     // Direct credential setters (for login success)
     setCredentials: (state, action: PayloadAction<{ user: User; accessToken: string }>) => {
       const { user, accessToken } = action.payload;
-      
+
       state.user = user;
       state.accessToken = accessToken;
       state.isAuthenticated = true;
       state.error = null;
       state.lastActivity = Date.now();
       state.initialized = true;
-      
+
       // Sync with token manager
       tokenManager.setAccessToken(accessToken);
-      
+
       console.log('Credentials set in Redux store');
     },
 
@@ -139,23 +138,23 @@ const authSlice = createSlice({
       state.error = null;
       state.lastActivity = null;
       state.initialized = true; // Keep initialized true
-      
+
       // Clear from token manager
       tokenManager.clearTokens();
-      
+
       console.log('Credentials cleared from Redux store');
     },
 
     // Update only the access token (for refresh)
     updateAccessToken: (state, action: PayloadAction<{ accessToken: string }>) => {
       const { accessToken } = action.payload;
-      
+
       state.accessToken = accessToken;
       state.lastActivity = Date.now();
-      
+
       // Sync with token manager
       tokenManager.setAccessToken(accessToken);
-      
+
       console.log('Access token updated in Redux store');
     },
 
@@ -183,10 +182,10 @@ const authSlice = createSlice({
       state.accessToken = null;
       state.isAuthenticated = false;
       state.error = 'Session expired. Please log in again.';
-      
+
       // Clear from token manager
       tokenManager.clearTokens();
-      
+
       console.log('Session marked as expired');
     }
   },
@@ -202,13 +201,13 @@ const authSlice = createSlice({
       })
       .addCase(initializeAuth.fulfilled, (state, action) => {
         const { user, isAuthenticated } = action.payload;
-        
+
         state.loading = false;
         state.initialized = true;
         state.isAuthenticated = isAuthenticated;
         state.user = user;
         state.error = null;
-        
+
         if (isAuthenticated && user) {
           state.lastActivity = Date.now();
           // Access token should already be set by the API call
@@ -221,11 +220,10 @@ const authSlice = createSlice({
         state.user = null;
         state.accessToken = null;
         state.error = action.payload || 'Authentication initialization failed';
-        
-        // Ensure token manager is cleared
+
+        // Clear only in-memory tokens
         tokenManager.clearTokens();
       })
-
       // Login
       .addCase(login.pending, (state) => {
         state.loading = true;
@@ -233,7 +231,7 @@ const authSlice = createSlice({
       })
       .addCase(login.fulfilled, (state, action) => {
         const { user, accessToken } = action.payload;
-        
+
         state.loading = false;
         state.user = user;
         state.accessToken = accessToken;
@@ -241,7 +239,7 @@ const authSlice = createSlice({
         state.error = null;
         state.initialized = true;
         state.lastActivity = Date.now();
-        
+
         // Sync with token manager
         tokenManager.setAccessToken(accessToken);
       })
@@ -251,7 +249,7 @@ const authSlice = createSlice({
         state.user = null;
         state.accessToken = null;
         state.error = action.payload || 'Login failed';
-        
+
         // Ensure token manager is cleared
         tokenManager.clearTokens();
       })
@@ -268,13 +266,13 @@ const authSlice = createSlice({
         state.error = null;
         state.lastActivity = null;
         state.initialized = true; // Keep initialized
-        
+
         // Clear from token manager
         tokenManager.clearTokens();
-        
+
         console.log('Logout completed in Redux');
       })
-      .addCase(logout.rejected, (state, ) => {
+      .addCase(logout.rejected, (state,) => {
         // Even if logout API fails, clear local state
         state.loading = false;
         state.user = null;
@@ -282,10 +280,10 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
         state.lastActivity = null;
         state.error = null; // Don't show logout API errors
-        
+
         // Clear from token manager
         tokenManager.clearTokens();
-        
+
         console.log('Logout completed (with API error) in Redux');
       })
 
@@ -294,7 +292,7 @@ const authSlice = createSlice({
         state.accessToken = action.payload;
         state.lastActivity = Date.now();
         state.error = null;
-        
+
         // Token manager already updated by the API call
       })
       .addCase(refreshTokens.rejected, (state,) => {
@@ -303,7 +301,7 @@ const authSlice = createSlice({
         state.accessToken = null;
         state.isAuthenticated = false;
         state.error = 'Session expired. Please log in again.';
-        
+
         // Clear from token manager
         tokenManager.clearTokens();
       })
