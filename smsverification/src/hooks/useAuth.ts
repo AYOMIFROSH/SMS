@@ -34,39 +34,50 @@ const useAuth = () => {
   }, [dispatch, auth.initialized, auth.loading]);
 
   // Listen for session expiration events from the API client
-  useEffect(() => {
-    const handleSessionExpired = (event: Event) => {
-      const detail = (event as CustomEvent)?.detail;
-      console.log('🔒 Session expired event received:', detail);
-      
-      if (auth.isAuthenticated) {
-        dispatch(sessionExpired());
-        
-        // Redirect to login after a short delay
-        setTimeout(() => {
-          if (window.location.pathname !== '/login') {
-            window.location.href = '/login';
-          }
-        }, 2000);
+useEffect(() => {
+  const isInitializing = !auth.initialized && auth.loading;
+
+  const handleSessionExpired = (event: Event) => {
+    const detail = (event as CustomEvent)?.detail;
+    console.log('🔒 Session expired event received:', detail);
+
+    // Always update Redux state to mark session expired
+    // but DO NOT redirect while initialization (refresh + /me) is in progress.
+    dispatch(sessionExpired());
+
+    if (isInitializing) {
+      // We're still bootstrapping — do not navigate away.
+      // Let the initializeAuth flow or UI handle the UX once it finishes.
+      console.log('ℹ️ Session expired received during auth initialization — deferring redirect.');
+      return;
+    }
+
+    // Only redirect the user after initialization is complete (or not running)
+    // and if they are not already on the login page.
+    setTimeout(() => {
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
       }
-    };
+    }, 2000);
+  };
 
-    const handleTokenUpdated = (event: Event) => {
-      const detail = (event as CustomEvent)?.detail;
-      if (detail?.accessToken && auth.isAuthenticated) {
-        console.log('🔔 Token updated from API client');
-        dispatch(updateAccessToken({ accessToken: detail.accessToken }));
-      }
-    };
+  const handleTokenUpdated = (event: Event) => {
+    const detail = (event as CustomEvent)?.detail;
+    if (detail?.accessToken && auth.isAuthenticated) {
+      console.log('🔔 Token updated from API client');
+      dispatch(updateAccessToken({ accessToken: detail.accessToken }));
+    }
+  };
 
-    window.addEventListener('auth:sessionExpired', handleSessionExpired as EventListener);
-    window.addEventListener('auth:tokenUpdated', handleTokenUpdated as EventListener);
+  window.addEventListener('auth:sessionExpired', handleSessionExpired as EventListener);
+  window.addEventListener('auth:tokenUpdated', handleTokenUpdated as EventListener);
 
-    return () => {
-      window.removeEventListener('auth:sessionExpired', handleSessionExpired as EventListener);
-      window.removeEventListener('auth:tokenUpdated', handleTokenUpdated as EventListener);
-    };
-  }, [dispatch, auth.isAuthenticated]);
+  return () => {
+    window.removeEventListener('auth:sessionExpired', handleSessionExpired as EventListener);
+    window.removeEventListener('auth:tokenUpdated', handleTokenUpdated as EventListener);
+  };
+}, [dispatch, auth.isAuthenticated, auth.initialized, auth.loading]);
+
 
   // Update axios default headers when access token changes
   useEffect(() => {

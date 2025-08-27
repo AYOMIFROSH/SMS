@@ -1,9 +1,7 @@
 // src/App.tsx - Production-ready app with security and proper error handling
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Provider } from 'react-redux';
 import { Toaster } from 'react-hot-toast';
-import { store } from '@/store/store';
 import DashboardLayout from '@/layouts/DashboardLayout';
 import AuthLayout from '@/layouts/AuthLayout';
 import Dashboard from '@/pages/Dashboard';
@@ -78,7 +76,7 @@ const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <p className="text-red-600 mb-4">
             Unable to connect to the server. Please check your connection and try again.
           </p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
             className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
           >
@@ -96,16 +94,18 @@ const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 const AppContent: React.FC = () => {
   const { isAuthenticated, isReady, needsLogin, isInitializing, hasError, errorMessage } = useAuth();
 
-  // Initialize WebSocket connection only when fully authenticated and ready
-  const { connectionError: wsError, isConnected: wsConnected } = useWebSocket(
-    undefined, // No custom message handler
-    isAuthenticated && isReady // Only enable when fully ready
-  );
 
-  console.log('App render state:', { 
-    isAuthenticated, 
-    isReady, 
-    needsLogin, 
+  // Initialize WebSocket connection only when fully authenticated and ready
+  const ws = useWebSocket(undefined, true);
+const { isConnected: wsConnected, connectionError: wsError } = ws;
+const hasConnectionIssue = !wsConnected && Boolean(wsError);
+
+
+
+  console.log('App render state:', {
+    isAuthenticated,
+    isReady,
+    needsLogin,
     isInitializing,
     wsConnected,
     wsError
@@ -135,7 +135,7 @@ const AppContent: React.FC = () => {
           </div>
           <h2 className="text-xl font-semibold text-red-800 mb-2">Authentication Error</h2>
           <p className="text-red-600 mb-4">{errorMessage}</p>
-          <button 
+          <button
             onClick={() => window.location.href = '/login'}
             className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
           >
@@ -249,7 +249,7 @@ const AppContent: React.FC = () => {
         {/* Connection Status Indicator */}
         {isAuthenticated && isReady && (
           <div className="fixed bottom-4 right-4 z-50">
-            {wsError ? (
+            {wsError || hasConnectionIssue ? (
               <div className="flex items-center space-x-2 bg-red-500 text-white px-3 py-2 rounded-lg shadow-lg text-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
@@ -261,9 +261,16 @@ const AppContent: React.FC = () => {
                 <div className="w-2 h-2 bg-green-200 rounded-full animate-pulse"></div>
                 <span>Connected</span>
               </div>
-            ) : null}
+            ) : (
+              <div className="flex items-center space-x-2 bg-yellow-500 text-white px-3 py-2 rounded-lg shadow-lg text-sm">
+                <div className="w-2 h-2 bg-yellow-200 rounded-full animate-pulse"></div>
+                <span>Connecting...</span>
+              </div>
+            )}
           </div>
         )}
+
+
       </div>
     </Router>
   );
@@ -273,11 +280,9 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <Provider store={store}>
-        <SecurityCheck>
-          <AppContent />
-        </SecurityCheck>
-      </Provider>
+      <SecurityCheck>
+        <AppContent />
+      </SecurityCheck>
     </ErrorBoundary>
   );
 };

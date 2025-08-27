@@ -9,38 +9,24 @@ interface PrivateRouteProps {
 }
 
 const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
-  const { isAuthenticated, isReady, initialized } = useAuth();
+  const { isAuthenticated, initialized, loading } = useAuth();
   const location = useLocation();
 
-  console.log('🛡️ PrivateRoute check:', {
-    isAuthenticated,
-    isReady,
-    initialized,
-    pathname: location.pathname
-  });
+  const isInitializing = loading && !initialized;
 
-  if (!initialized) {
+  if (isInitializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <LoadingSpinner size="lg" />
-        </div>
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    console.log('❌ User not authenticated, redirecting to login');
-    return (
-      <Navigate
-        to="/login"
-        state={{ from: location.pathname }}
-        replace
-      />
-    );
+  // ✅ Redirect only AFTER initialization finishes
+  if (initialized && !isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
 
-  console.log('✅ User authenticated, rendering protected content');
   return <>{children}</>;
 };
 

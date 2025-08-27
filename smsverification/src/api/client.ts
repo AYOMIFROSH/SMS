@@ -1,18 +1,94 @@
-// src/api/client.ts - Production-ready HTTP client with proper security
+// src/api/client.ts - Enhanced with CSRF and iOS support
 import axios, { AxiosError } from 'axios';
+import { ApiError } from '@/types';
 import type { AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// Centralized token manager with proper lifecycle
+// CSRF Token Manager
+// CSRF Token Manager
+class CSRFManager {
+  private csrfToken: string | null = null;
+  private fetchPromise: Promise<string> | null = null;
+  private lastFetched: number | null = null;
+  private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 min TTL
+
+  /**
+   * Get a valid CSRF token, refreshing if missing or expired.
+   */
+  async getToken(): Promise<string> {
+    if (this.hasValidToken()) return this.csrfToken as string;
+    if (this.fetchPromise) return this.fetchPromise;
+
+    this.fetchPromise = this.fetchToken();
+    try {
+      const token = await this.fetchPromise;
+      return token;
+    } finally {
+      this.fetchPromise = null;
+    }
+  }
+
+  /**
+   * Actually fetch a new token from the server.
+   */
+  private async fetchToken(): Promise<string> {
+    try {
+      const response = await axios.get(`${API_URL}/csrf-token`, {
+        withCredentials: true,
+        timeout: 10000
+      });
+
+      const csrfToken = response.data?.csrfToken;
+      if (response.data?.success && typeof csrfToken === 'string' && csrfToken.trim()) {
+        this.csrfToken = csrfToken;
+        this.lastFetched = Date.now();
+        return csrfToken;
+      }
+
+      throw new Error('Invalid CSRF response');
+    } catch (error) {
+      this.clearToken();
+      console.warn('Failed to get CSRF token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if the current token is still valid based on TTL.
+   */
+  private hasValidToken(): boolean {
+    if (!this.csrfToken || !this.lastFetched) return false;
+    return Date.now() - this.lastFetched < this.TOKEN_TTL;
+  }
+
+  /**
+   * Clear the token manually, e.g., on logout or CSRF failure.
+   */
+  clearToken(): void {
+    this.csrfToken = null;
+    this.lastFetched = null;
+  }
+
+  /**
+   * Allow manual token injection if needed.
+   */
+  setToken(token: string): void {
+    this.csrfToken = token;
+    this.lastFetched = Date.now();
+  }
+}
+
+// Enhanced Token Manager with iOS Support
+// --- TokenManager (updated) ---
 class TokenManager {
   private accessToken: string | null = null;
   private refreshPromise: Promise<string | null> | null = null;
 
   setAccessToken(token: string | null): void {
     this.accessToken = token;
-    console.log('🔧 Access token updated:', !!token);
+    console.log('Access token updated:', !!token);
   }
 
   getAccessToken(): string | null {
@@ -20,20 +96,19 @@ class TokenManager {
   }
 
   clearTokens(): void {
-    console.log('🗑️ Clearing all tokens from memory');
+    console.log('Clearing all tokens from memory');
     this.accessToken = null;
     this.refreshPromise = null;
+    csrfManager.clearToken();
   }
 
   hasValidToken(): boolean {
     return Boolean(this.accessToken);
   }
 
-  // Prevent concurrent refresh attempts
   async refreshToken(): Promise<string | null> {
-  
     if (this.refreshPromise) {
-      console.log('🔄 Refresh already in progress, waiting...');
+      console.log('Refresh already in progress, waiting...');
       return this.refreshPromise;
     }
 
@@ -49,21 +124,20 @@ class TokenManager {
 
   private async performRefresh(): Promise<string | null> {
     try {
-      console.log('🔄 Performing token refresh via httpOnly cookies...');
+      console.log('Performing token refresh via httpOnly cookies...');
 
+      // Use httpOnly cookie refresh endpoint only. No localStorage fallbacks.
       const response = await axios.post(`${API_URL}/auth/refresh`, null, {
         withCredentials: true,
         timeout: 30000,
-        headers: {
-          'X-Skip-Auth-Interceptor': 'true'
-        }
+        headers: { 'X-Skip-Auth-Interceptor': 'true' }
       });
 
       if (response.data?.success && response.data?.accessToken) {
         const newToken = response.data.accessToken;
         this.setAccessToken(newToken);
 
-        // Emit token update event
+        // Emit token update event for other parts of the app (still useful)
         window.dispatchEvent(new CustomEvent('auth:tokenUpdated', {
           detail: { accessToken: newToken }
         }));
@@ -73,12 +147,12 @@ class TokenManager {
 
       throw new Error('Invalid refresh response');
     } catch (error: any) {
-      console.error('❌ Token refresh failed:', error);
+      console.error('Token refresh failed:', error);
 
       // Clear tokens on refresh failure
       this.clearTokens();
 
-      // Emit logout event
+      // Emit logout/session expired event
       window.dispatchEvent(new CustomEvent('auth:sessionExpired', {
         detail: { reason: 'refresh_failed' }
       }));
@@ -89,8 +163,9 @@ class TokenManager {
 }
 
 export const tokenManager = new TokenManager();
+export const csrfManager = new CSRFManager();
 
-// Enhanced axios client with proper security
+// Enhanced axios client
 const client = axios.create({
   baseURL: API_URL,
   timeout: 90000,
@@ -101,10 +176,9 @@ const client = axios.create({
   },
 });
 
-// Request interceptor
+// Request interceptor with CSRF support
 client.interceptors.request.use(
-  (config) => {
-    
+  async (config) => {
     const startTime = Date.now();
     (config as any).metadata = { startTime };
 
@@ -116,23 +190,48 @@ client.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Add CSRF token for state-changing requests
+    const needsCSRF = ['post', 'put', 'patch', 'delete'].includes(
+      config.method?.toLowerCase() || ''
+    );
+
+    if (needsCSRF && !config.headers['X-Skip-Auth-Interceptor']) {
+      try {
+        const csrfToken = await csrfManager.getToken();
+        config.headers['X-CSRF-Token'] = csrfToken;
+      } catch (error) {
+        console.warn('Failed to get CSRF token for request:', error);
+        // Continue without CSRF token - let server handle it
+      }
+    }
+
+    // iOS helper header (no localStorage fallbacks)
+    const userAgent = navigator.userAgent;
+    if (/iPad|iPhone|iPod|CriOS|FxiOS/.test(userAgent)) {
+      if (token) {
+        config.headers['X-Access-Token'] = token;
+      }
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor with simplified error handling
-client.interceptors.response.use((response) => {
-  const cfg = response.config as AxiosRequestConfig & { metadata?: { startTime: number } };
-  const duration = Date.now() - (cfg.metadata?.startTime ?? Date.now());
 
-  if (duration > 30000) {
-    console.warn(`⚠️ Slow response (${duration}ms) - possible cold start`);
-  }
+// Response interceptor with enhanced error handling
+client.interceptors.response.use(
+  (response) => {
+    const cfg = response.config as AxiosRequestConfig & { metadata?: { startTime: number } };
+    const duration = Date.now() - (cfg.metadata?.startTime ?? Date.now());
 
-  return response;
-},
-  async (error: AxiosError) => {
+    if (duration > 30000) {
+      console.warn(`⚠️ Slow response (${duration}ms) - possible cold start`);
+    }
+
+    return response;
+  },
+  async (error: AxiosError<ApiError>) => {   
     const originalRequest = error.config as AxiosRequestConfig & {
       _retry?: boolean;
       metadata?: { startTime: number };
@@ -143,21 +242,37 @@ client.interceptors.response.use((response) => {
       ? Date.now() - originalRequest.metadata.startTime
       : 0;
 
-    // Handle network errors (cold starts)
+    // Handle network errors
     if (!error.response && (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED')) {
       console.error(`❌ Network error (${duration}ms):`, error.message);
-
+      
       if (duration > 30000) {
         toast.loading('Server is starting up, please wait...', { duration: 8000 });
       }
-
+      
       return Promise.reject(error);
     }
 
     if (error.response) {
-      const { status } = error.response;
-
+      const { status, data } = error.response;
       console.error(`❌ ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`);
+
+      // Handle CSRF token errors
+      if (status === 403 && data?.code === 'CSRF_ERROR') {
+        console.warn('CSRF token invalid, clearing and retrying...');
+        csrfManager.clearToken();
+        
+        if (originalRequest && !originalRequest._retry) {
+          originalRequest._retry = true;
+          try {
+            const newCSRFToken = await csrfManager.getToken();
+            originalRequest.headers['X-CSRF-Token'] = newCSRFToken;
+            return client(originalRequest);
+          } catch (csrfError) {
+            console.error('Failed to get new CSRF token:', csrfError);
+          }
+        }
+      }
 
       // Handle 401 Unauthorized with token refresh
       if (status === 401 &&
@@ -176,15 +291,14 @@ client.interceptors.response.use((response) => {
             return client(originalRequest);
           }
         } catch (refreshError) {
-          // Refresh failed, let the error propagate
-          console.error('❌ Refresh failed during 401 handling');
+          console.error('Refresh failed during 401 handling');
         }
       }
 
-      // Handle other status codes without intrusive toasts
+      // Handle other status codes
       switch (status) {
         case 403:
-          if (!originalRequest?.url?.includes('/health')) {
+          if (data?.code !== 'CSRF_ERROR' && !originalRequest?.url?.includes('/health')) {
             console.warn('🚫 Access forbidden');
           }
           break;

@@ -12,13 +12,13 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
-  const { user, stats } = useSelector((state: RootState) => ({
-    user: state.auth.user,
-    stats: state.dashboard.stats,
-  }));
+  const user = useSelector((state: RootState) => state.auth.user);
+const stats = useSelector((state: RootState) => state.dashboard.stats);
+
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  
 
   const handleLogout = async () => {
     try {

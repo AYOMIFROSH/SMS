@@ -1,11 +1,23 @@
-import axios from "axios";
-
+import 'axios';
+import { ApiError, ApiResponse } from './index'; // adjust path if needed
 
 declare module 'axios' {
-  // Add a metadata field you set in the request interceptor
   export interface AxiosRequestConfig {
     metadata?: {
       startTime: number;
+    };
+  }
+
+  export interface AxiosResponse<T = any> {
+    data: ApiResponse<T>;
+  }
+
+  export interface AxiosError<T = any> {
+    response?: {
+      data: ApiError;   // now uses the type properly
+      status: number;
+      headers: any;
+      config: AxiosRequestConfig;
     };
   }
 }

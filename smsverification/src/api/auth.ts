@@ -117,42 +117,39 @@ export const authApi = {
   console.log('🚀 Initializing authentication from cookies...');
 
   try {
-    // 1. Refresh token first
+    // 1) Refresh token using httpOnly cookie
     const newToken = await tokenManager.refreshToken();
 
     if (!newToken) {
-      console.log('ℹ️ No valid session found');
+      console.log('ℹ️ No valid session found (refresh returned null)');
       return { user: null, isAuthenticated: false };
     }
 
-    // 2. Set token immediately
+    // 2) Immediately set Authorization header for subsequent calls
     client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-    // 3. Authenticate right away, even before user data is ready
-    const result: InitializeResponse = { user: null, isAuthenticated: true };
 
-    // 4. Fetch user in background (don't block UI)
-    authApi.me()
-      .then((user) => {
-        result.user = user;
-        console.log('✅ User details loaded after auth init');
-      })
-      .catch((err) => {
-        console.warn('⚠️ Failed to load user details:', err.message);
-      });
-
-    return result;
+    // 3) Now fetch the user and wait for it — only then consider user authenticated
+    try {
+      const user = await authApi.me(); // will throw if /me fails
+      console.log('✅ User authenticated during init:', user?.username ?? user?.id);
+      return { user, isAuthenticated: true };
+    } catch (meErr: any) {
+      // If /me fails after a successful refresh, treat as unauthenticated
+      console.warn('⚠️ /me failed during init after refresh:', meErr?.message || meErr);
+      tokenManager.clearTokens();
+      delete client.defaults.headers.common['Authorization'];
+      return { user: null, isAuthenticated: false };
+    }
 
   } catch (error: any) {
-    console.warn('⚠️ Auth initialization error:', error.message);
+    console.warn('⚠️ Auth initialization error:', error?.message || error);
     tokenManager.clearTokens();
     delete client.defaults.headers.common['Authorization'];
     return { user: null, isAuthenticated: false };
-
   } finally {
     isInitializing = false;
   }
 },
-
 
   /**
    * Refresh access token using httpOnly refresh cookie
