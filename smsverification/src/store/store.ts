@@ -11,8 +11,10 @@ import servicesReducer from './slices/servicesSlice';
 const persistConfig = {
   key: 'root',
   storage,
-  whitelist: ['auth'], // Only persist the auth slice
+  whitelist: ['auth'], // keep auth slice, but…
+  blacklist: ['accessToken'], // do NOT persist accessToken
 };
+
 
 const rootReducer = combineReducers({
   auth: authReducer,
@@ -37,3 +39,5 @@ export const persistor = persistStore(store);
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
+
+

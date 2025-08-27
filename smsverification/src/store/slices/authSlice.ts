@@ -3,6 +3,7 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { authApi } from '@/api/auth';
 import { tokenManager } from '@/api/client';
 import { User } from '@/types';
+import { persistor } from '../store';
 
 export interface AuthState {
   user: User | null;
@@ -46,12 +47,13 @@ export const login = createAsyncThunk<
 
 export const logout = createAsyncThunk<void, void, { rejectValue: string }>(
   'auth/logout',
-  async (_, { }) => {
+  async (_, { dispatch }) => {
     try {
       await authApi.logout();
-    } catch (error: any) {
-      // Don't reject logout - always clear local state
-      console.warn('Logout API call failed, but clearing local state:', error.message);
+    } finally {
+      persistor.purge();       // purge persisted state
+      dispatch(sessionExpired()); // clear auth slice
+      window.location.href = '/login'; // optional redirect
     }
   }
 );
@@ -64,12 +66,15 @@ export const initializeAuth = createAsyncThunk<
   'auth/initialize',
   async (_, { rejectWithValue }) => {
     try {
-      return await authApi.initializeAuth();
+      // Force server validation; ignore any persisted tokens
+      const result = await authApi.initializeAuth();
+      return result;
     } catch (error: any) {
       return rejectWithValue(error.message || 'Authentication initialization failed');
     }
   }
 );
+
 
 export const refreshTokens = createAsyncThunk<
   string,
