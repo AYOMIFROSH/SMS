@@ -5,7 +5,7 @@ import path from 'path';
 export default defineConfig(({ command, mode }) => {
   // Load environment variables based on mode
   const env = loadEnv(mode, process.cwd(), '');
-  
+
   const isProduction = mode === 'production';
   const isDevelopment = mode === 'development';
 
@@ -13,7 +13,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       react(),
     ],
-    
+
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
@@ -62,22 +62,23 @@ export default defineConfig(({ command, mode }) => {
       assetsDir: 'assets',
       sourcemap: !isProduction, // Source maps only in non-production
       minify: isProduction ? 'terser' : false,
-      
+
       // Chunk splitting for better caching
       rollupOptions: {
         output: {
           manualChunks: {
-            // Vendor chunk for third-party libraries
+            // Separate vendor chunk for React
             vendor: ['react', 'react-dom'],
-            // Separate chunk for utility libraries
-            utils: ['axios', 'lodash-es'],
+
+            // Utility libraries chunk (only include installed packages)
+            utils: ['axios'],
           },
           // Asset naming for better caching
-          chunkFileNames: isProduction 
+          chunkFileNames: isProduction
             ? 'assets/js/[name].[hash].js'
             : 'assets/js/[name].js',
           entryFileNames: isProduction
-            ? 'assets/js/[name].[hash].js' 
+            ? 'assets/js/[name].[hash].js'
             : 'assets/js/[name].js',
           assetFileNames: isProduction
             ? 'assets/[ext]/[name].[hash].[ext]'
