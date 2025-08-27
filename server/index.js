@@ -52,45 +52,33 @@ app.use(helmet({
 const sessionMiddleware = async () => {
   const redisClient = getRedisClient();
 
-  const getSessionConfig = async () => {
-    const { getRedisClient } = require('./Config/redis');
-    const redisClient = getRedisClient();
-
-    return {
-      name: process.env.SESSION_COOKIE_NAME || 'sessionId',
-      secret: process.env.SESSION_SECRET || 'your-super-secret-session-key-minimum-32-chars',
-      resave: false,
-      saveUninitialized: false,
-      store: redisClient?.isOpen ? new (require('connect-redis').RedisStore)({
-        client: redisClient,
-        prefix: 'sess:',
-        ttl: 86400 // 24 hours
-      }) : undefined,
-      cookie: {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        domain: process.env.NODE_ENV === 'production'
-          ? process.env.COOKIE_DOMAIN || undefined
-          : undefined
-      }
-    };
+  const sessionConfig = {
+    name: process.env.SESSION_COOKIE_NAME || 'sessionId',
+    secret: process.env.SESSION_SECRET || 'your-super-secret-session-key-minimum-32-chars',
+    resave: false,               // required to remove warning
+    saveUninitialized: false,    // required to remove warning
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined
+    },
+    store: undefined
   };
 
-  // Use Redis store if available
   if (redisClient && redisClient.isOpen) {
-    getSessionConfig.store = new RedisStore({
+    sessionConfig.store = new RedisStore({
       client: redisClient,
       prefix: 'sess:',
-      ttl: 86400 // 24 hours in seconds
+      ttl: 86400 // 24 hours
     });
     logger.info('Using Redis for session storage');
   } else {
     logger.warn('Redis not available, using memory store for sessions');
   }
 
-  return session(getSessionConfig);
+  return session(sessionConfig);
 };
 
 // Enhanced CORS Configuration
