@@ -51,24 +51,36 @@ app.use(helmet({
 // Session Configuration with Redis Store
 const sessionMiddleware = async () => {
   const redisClient = getRedisClient();
-  
-  const sessionConfig = {
-    name: 'sessionId', // Custom session name
-    secret: process.env.SESSION_SECRET || 'your-super-secret-session-key-minimum-32-chars',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-      domain: process.env.COOKIE_DOMAIN || undefined
-    }
+
+  const getSessionConfig = async () => {
+    const { getRedisClient } = require('./Config/redis');
+    const redisClient = getRedisClient();
+
+    return {
+      name: process.env.SESSION_COOKIE_NAME || 'sessionId',
+      secret: process.env.SESSION_SECRET || 'your-super-secret-session-key-minimum-32-chars',
+      resave: false,
+      saveUninitialized: false,
+      store: redisClient?.isOpen ? new (require('connect-redis').RedisStore)({
+        client: redisClient,
+        prefix: 'sess:',
+        ttl: 86400 // 24 hours
+      }) : undefined,
+      cookie: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production'
+          ? process.env.COOKIE_DOMAIN || undefined
+          : undefined
+      }
+    };
   };
 
   // Use Redis store if available
   if (redisClient && redisClient.isOpen) {
-    sessionConfig.store = new RedisStore({ 
+    getSessionConfig.store = new RedisStore({
       client: redisClient,
       prefix: 'sess:',
       ttl: 86400 // 24 hours in seconds
@@ -78,36 +90,35 @@ const sessionMiddleware = async () => {
     logger.warn('Redis not available, using memory store for sessions');
   }
 
-  return session(sessionConfig);
+  return session(getSessionConfig);
 };
 
 // Enhanced CORS Configuration
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://mysmsnumber.vercel.app';
-const DEV_FRONTEND_URL = process.env.DEV_FRONTEND_URL || 'http://localhost:5173';
 
 // Enhanced CORS Configuration for iOS compatibility
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = [FRONTEND_URL];
-    
-    // Add development URLs
-    if (process.env.NODE_ENV !== 'production') {
-      allowedOrigins.push(DEV_FRONTEND_URL);
-      allowedOrigins.push('http://localhost:3000');
-      allowedOrigins.push('http://localhost:5173');
-    }
-    
-    // Allow requests with no origin (mobile apps, Postman, etc)
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'https://yourapp.vercel.app',
+      ...(process.env.NODE_ENV !== 'production' ? [
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://localhost:5174'
+      ] : [])
+    ];
+
+    // Allow no origin (mobile apps, Postman)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    
-    logger.warn('CORS blocked origin:', origin);
+
+    console.warn('CORS blocked origin:', origin);
     return callback(new Error('Not allowed by CORS'));
   },
-  credentials: true, // Essential for cookies
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
     'Origin',
@@ -117,24 +128,22 @@ const corsOptions = {
     'Authorization',
     'Cache-Control',
     'X-CSRF-Token',
-    'x-skip-retry',
-    'x-skip-auth-interceptor',
-    // iOS-specific headers
-    'X-Access-Token',
-    'X-Session-Token', 
-    'X-Refresh-Token'
-  ],
-  exposedHeaders: [
-    'X-Total-Count', 
-    'X-Page-Count', 
-    'X-CSRF-Token',
-    // Expose tokens for iOS fallback
+    'CSRF-Token',
+    'x-csrf-token',
+    'csrf-token',
+    // iOS fallback headers
     'X-Access-Token',
     'X-Session-Token',
-    'X-Refresh-Token'
+    'X-Refresh-Token',
+    'x-skip-auth-interceptor' // 👈 Add this
+
   ],
-  maxAge: 86400,
-  // iOS-specific CORS options
+  exposedHeaders: [
+    'X-CSRF-Token',
+    'X-Total-Count',
+    'X-Page-Count'
+  ],
+  maxAge: 86400, // 24 hours
   preflightContinue: false,
   optionsSuccessStatus: 204
 };
@@ -194,11 +203,26 @@ app.use((req, res, next) => {
 });
 
 // CSRF Protection Setup (after session but before routes)
+// CSRF Protection with Enhanced Configuration
 const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 3600000, // 1 hour
+    path: '/',
+    // Add domain for production if using custom domain
+    domain: process.env.NODE_ENV === 'production'
+      ? process.env.COOKIE_DOMAIN || undefined
+      : undefined
+  },
+  ignoreMethods: ['GET', 'HEAD', 'OPTIONS'],
+  value: (req) => {
+    // Multiple CSRF token sources
+    return req.body._csrf ||
+      req.query._csrf ||
+      req.headers['x-csrf-token'] ||
+      req.headers['csrf-token'];
   }
 });
 
@@ -206,7 +230,10 @@ const csrfProtection = csrf({
 app.get('/api/csrf-token', csrfProtection, (req, res) => {
   res.json({ 
     success: true,
-    csrfToken: req.csrfToken() 
+    csrfToken: req.csrfToken(),
+    // Additional security info for debugging
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   });
 });
 
@@ -214,7 +241,7 @@ app.get('/api/csrf-token', csrfProtection, (req, res) => {
 app.get('/api/health', async (req, res) => {
   try {
     const sessionStats = await sessionService.getSessionStats();
-    
+
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -274,14 +301,14 @@ app.post('/webhook/sms-activate', express.raw({ type: 'application/json' }), asy
     // Verify webhook signature if provided
     const signature = req.headers['x-sms-activate-signature'];
     const webhookSecret = process.env.SMS_ACTIVATE_WEBHOOK_SECRET;
-    
+
     if (webhookSecret && signature) {
       const crypto = require('crypto');
       const expectedSignature = crypto
         .createHmac('sha256', webhookSecret)
         .update(req.rawBody)
         .digest('hex');
-      
+
       if (signature !== expectedSignature) {
         logger.warn('Invalid webhook signature');
         return res.status(401).json({ error: 'Invalid signature' });
@@ -291,7 +318,7 @@ app.post('/webhook/sms-activate', express.raw({ type: 'application/json' }), asy
     // Verify IP whitelist if configured
     const allowedIPs = process.env.SMS_ACTIVATE_IPS?.split(',').map(ip => ip.trim()) || [];
     const clientIP = req.ip || req.connection.remoteAddress;
-    
+
     if (allowedIPs.length > 0 && !allowedIPs.includes(clientIP)) {
       logger.warn(`Webhook from unauthorized IP: ${clientIP}`);
       return res.status(403).json({ error: 'Unauthorized IP' });
@@ -299,7 +326,7 @@ app.post('/webhook/sms-activate', express.raw({ type: 'application/json' }), asy
 
     // Parse webhook data
     const webhookData = JSON.parse(req.rawBody);
-    
+
     // Validate required fields
     if (!webhookData.activationId || !webhookData.status) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -314,10 +341,10 @@ app.post('/webhook/sms-activate', express.raw({ type: 'application/json' }), asy
         logger.error('Webhook processing error:', error);
       }
     });
-    
+
     // Respond immediately
     res.status(200).json({ success: true });
-    
+
   } catch (error) {
     logger.error('Webhook error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -493,21 +520,21 @@ async function startServer() {
 // Graceful shutdown
 const gracefulShutdown = (signal) => {
   logger.info(`${signal} received, shutting down gracefully...`);
-  
+
   server.close(async () => {
     try {
       // Close database connections
       const { getPool, getExistingDbPool } = require('./Config/database');
       const pool = getPool();
       const existingPool = getExistingDbPool();
-      
+
       if (pool) await pool.end();
       if (existingPool) await existingPool.end();
-      
+
       // Close Redis
       const redis = getRedisClient();
       if (redis) await redis.quit();
-      
+
       logger.info('✅ Graceful shutdown completed');
       process.exit(0);
     } catch (error) {
