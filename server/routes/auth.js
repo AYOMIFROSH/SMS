@@ -63,7 +63,7 @@ const getCookieOptions = (req) => {
     httpOnly: true,
     secure: isProduction,
     path: '/',
-    domain: isProduction ? process.env.COOKIE_DOMAIN || undefined : undefined
+    domain: process.env.NODE_ENV === 'production' ? ".fizzbuzzup.com" : undefined
   };
 
   // Production cross-origin setup

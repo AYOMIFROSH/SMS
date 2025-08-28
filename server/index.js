@@ -63,7 +63,7 @@ const sessionMiddleware = async () => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000,
-      domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined
+      domain: process.env.NODE_ENV === 'production' ? ".fizzbuzzup.com" : undefined
     },
     store: undefined
   };
@@ -205,9 +205,8 @@ const csrfProtection = csrf({
     maxAge: 3600000, // 1 hour
     path: '/',
     // Add domain for production if using custom domain
-    domain: process.env.NODE_ENV === 'production'
-      ? process.env.COOKIE_DOMAIN || undefined
-      : undefined
+    domain: process.env.NODE_ENV === 'production' ? ".fizzbuzzup.com" : undefined
+
   },
   ignoreMethods: ['GET', 'HEAD', 'OPTIONS'],
   value: (req) => {
