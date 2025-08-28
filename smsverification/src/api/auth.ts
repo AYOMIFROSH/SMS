@@ -1,4 +1,4 @@
-// src/api/auth.ts - Simplified and secure authentication API
+// src/api/auth.ts - Fixed initialization flow
 import client, { tokenManager } from './client';
 import { User } from '@/types';
 
@@ -21,14 +21,12 @@ export interface InitializeResponse {
   isAuthenticated: boolean;
 }
 
-let isInitializing = false;
-
 export const authApi = {
   /**
    * Login with credentials - server sets httpOnly cookies automatically
    */
   login: async (username: string, password: string): Promise<LoginResponse> => {
-    console.log('🔐 Attempting login for:', username);
+    console.log('Attempting login for:', username);
 
     try {
       const response = await client.post('/auth/login', { 
@@ -37,7 +35,7 @@ export const authApi = {
       });
 
       if (response.data.success) {
-        console.log('✅ Login successful');
+        console.log('Login successful');
         
         // Store access token in memory
         tokenManager.setAccessToken(response.data.accessToken);
@@ -47,7 +45,7 @@ export const authApi = {
       
       throw new Error(response.data.message || 'Login failed');
     } catch (error: any) {
-      console.error('❌ Login failed:', error);
+      console.error('Login failed:', error);
       
       if (error.response?.data?.code) {
         const errorMap: Record<string, string> = {
@@ -70,22 +68,17 @@ export const authApi = {
    * Logout - clears server cookies and local tokens
    */
   logout: async (): Promise<void> => {
-    console.log('🔐 Initiating logout process...');
+    console.log('Initiating logout process...');
     
     try {
-      // Call server logout endpoint to clear httpOnly cookies
       await client.post('/auth/logout');
-      console.log('✅ Server logout successful');
+      console.log('Server logout successful');
     } catch (error) {
-      console.warn('⚠️ Server logout failed, continuing with cleanup:', error);
+      console.warn('Server logout failed, continuing with cleanup:', error);
     } finally {
-      // Always clear local tokens regardless of server response
       tokenManager.clearTokens();
-      
-      // Clear axios default headers
       delete client.defaults.headers.common['Authorization'];
-      
-      console.log('✅ Local tokens cleared');
+      console.log('Local tokens cleared');
     }
   },
 
@@ -93,7 +86,7 @@ export const authApi = {
    * Get current authenticated user
    */
   me: async (): Promise<User> => {
-    console.log('👤 Fetching current user...');
+    console.log('Fetching current user...');
     
     const response = await client.get('/auth/me');
     
@@ -105,60 +98,59 @@ export const authApi = {
   },
 
   /**
-   * Initialize authentication from httpOnly cookies on app start
+   * Initialize authentication - SIMPLIFIED APPROACH
+   * Always try server validation first, regardless of any stored tokens
    */
   initializeAuth: async (): Promise<InitializeResponse> => {
-  if (isInitializing) {
-    console.log('🔄 Auth initialization already in progress...');
-    return { user: null, isAuthenticated: false };
-  }
+    console.log('Initializing authentication...');
 
-  isInitializing = true;
-  console.log('🚀 Initializing authentication from cookies...');
-
-  try {
-    // 1) Refresh token using httpOnly cookie
-    const newToken = await tokenManager.refreshToken();
-
-    if (!newToken) {
-      console.log('ℹ️ No valid session found (refresh returned null)');
-      return { user: null, isAuthenticated: false };
-    }
-
-    // 2) Immediately set Authorization header for subsequent calls
-    client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-
-    // 3) Now fetch the user and wait for it — only then consider user authenticated
     try {
-      const user = await authApi.me(); // will throw if /me fails
-      console.log('✅ User authenticated during init:', user?.username ?? user?.id);
-      return { user, isAuthenticated: true };
-    } catch (meErr: any) {
-      // If /me fails after a successful refresh, treat as unauthenticated
-      console.warn('⚠️ /me failed during init after refresh:', meErr?.message || meErr);
+      // Step 1: Try to refresh token using httpOnly cookie
+      console.log('Attempting token refresh...');
+      const refreshResponse = await client.post('/auth/refresh', {}, {
+        headers: { 'X-Skip-Auth-Interceptor': 'true' }
+      });
+
+      if (refreshResponse.data?.success && refreshResponse.data?.accessToken) {
+        const accessToken = refreshResponse.data.accessToken;
+        
+        // Step 2: Set token in memory and axios header
+        tokenManager.setAccessToken(accessToken);
+        client.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+
+        // Step 3: Fetch user info to confirm everything is working
+        try {
+          const user = await authApi.me();
+          console.log('Auth initialization successful for user:', user.username);
+          return { user, isAuthenticated: true };
+        } catch (meError) {
+          console.warn('User fetch failed after refresh:', meError);
+          throw meError;
+        }
+      } else {
+        throw new Error('No valid refresh token');
+      }
+
+    } catch (error: any) {
+      console.log('Auth initialization failed - no valid session');
+      
+      // Clean up any stale tokens
       tokenManager.clearTokens();
       delete client.defaults.headers.common['Authorization'];
+      
+      // Return unauthenticated state (this is not an error condition)
       return { user: null, isAuthenticated: false };
     }
-
-  } catch (error: any) {
-    console.warn('⚠️ Auth initialization error:', error?.message || error);
-    tokenManager.clearTokens();
-    delete client.defaults.headers.common['Authorization'];
-    return { user: null, isAuthenticated: false };
-  } finally {
-    isInitializing = false;
-  }
-},
+  },
 
   /**
    * Refresh access token using httpOnly refresh cookie
    */
   refresh: async (): Promise<string | null> => {
     try {
-      console.log('🔄 Refreshing access token...');
+      console.log('Refreshing access token...');
       
-      const response = await client.post('/auth/refresh', null, {
+      const response = await client.post('/auth/refresh', {}, {
         headers: { 'X-Skip-Auth-Interceptor': 'true' }
       });
       
@@ -166,14 +158,14 @@ export const authApi = {
         const newToken = response.data.accessToken;
         tokenManager.setAccessToken(newToken);
         
-        console.log('✅ Token refresh successful');
+        console.log('Token refresh successful');
         return newToken;
       }
       
       throw new Error('Invalid refresh response');
       
     } catch (error) {
-      console.error('❌ Token refresh failed:', error);
+      console.error('Token refresh failed:', error);
       tokenManager.clearTokens();
       return null;
     }

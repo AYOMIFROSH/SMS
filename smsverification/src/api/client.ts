@@ -1,4 +1,4 @@
-// src/api/client.ts - Enhanced with CSRF and iOS support
+// src/api/client.ts - Fixed API client with proper request body handling
 import axios, { AxiosError } from 'axios';
 import { ApiError } from '@/types';
 import type { AxiosRequestConfig } from 'axios';
@@ -7,16 +7,12 @@ import toast from 'react-hot-toast';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 // CSRF Token Manager
-// CSRF Token Manager
 class CSRFManager {
   private csrfToken: string | null = null;
   private fetchPromise: Promise<string> | null = null;
   private lastFetched: number | null = null;
   private readonly TOKEN_TTL = 10 * 60 * 1000; // 10 min TTL
 
-  /**
-   * Get a valid CSRF token, refreshing if missing or expired.
-   */
   async getToken(): Promise<string> {
     if (this.hasValidToken()) return this.csrfToken as string;
     if (this.fetchPromise) return this.fetchPromise;
@@ -30,9 +26,6 @@ class CSRFManager {
     }
   }
 
-  /**
-   * Actually fetch a new token from the server.
-   */
   private async fetchToken(): Promise<string> {
     try {
       const response = await axios.get(`${API_URL}/csrf-token`, {
@@ -55,33 +48,23 @@ class CSRFManager {
     }
   }
 
-  /**
-   * Check if the current token is still valid based on TTL.
-   */
   private hasValidToken(): boolean {
     if (!this.csrfToken || !this.lastFetched) return false;
     return Date.now() - this.lastFetched < this.TOKEN_TTL;
   }
 
-  /**
-   * Clear the token manually, e.g., on logout or CSRF failure.
-   */
   clearToken(): void {
     this.csrfToken = null;
     this.lastFetched = null;
   }
 
-  /**
-   * Allow manual token injection if needed.
-   */
   setToken(token: string): void {
     this.csrfToken = token;
     this.lastFetched = Date.now();
   }
 }
 
-// Enhanced Token Manager with iOS Support
-// --- TokenManager (updated) ---
+// Token Manager
 class TokenManager {
   private accessToken: string | null = null;
   private refreshPromise: Promise<string | null> | null = null;
@@ -126,18 +109,20 @@ class TokenManager {
     try {
       console.log('Performing token refresh via httpOnly cookies...');
 
-      // Use httpOnly cookie refresh endpoint only. No localStorage fallbacks.
-      const response = await axios.post(`${API_URL}/auth/refresh`, null, {
+      // Send empty object instead of null to avoid JSON parsing issues
+      const response = await axios.post(`${API_URL}/auth/refresh`, {}, {
         withCredentials: true,
         timeout: 30000,
-        headers: { 'X-Skip-Auth-Interceptor': 'true' }
+        headers: { 
+          'X-Skip-Auth-Interceptor': 'true',
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.data?.success && response.data?.accessToken) {
         const newToken = response.data.accessToken;
         this.setAccessToken(newToken);
 
-        // Emit token update event for other parts of the app (still useful)
         window.dispatchEvent(new CustomEvent('auth:tokenUpdated', {
           detail: { accessToken: newToken }
         }));
@@ -149,10 +134,8 @@ class TokenManager {
     } catch (error: any) {
       console.error('Token refresh failed:', error);
 
-      // Clear tokens on refresh failure
       this.clearTokens();
 
-      // Emit logout/session expired event
       window.dispatchEvent(new CustomEvent('auth:sessionExpired', {
         detail: { reason: 'refresh_failed' }
       }));
@@ -169,20 +152,20 @@ export const csrfManager = new CSRFManager();
 const client = axios.create({
   baseURL: API_URL,
   timeout: 90000,
-  withCredentials: true, // Essential for httpOnly cookies
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest', // CSRF protection
+    'X-Requested-With': 'XMLHttpRequest',
   },
 });
 
-// Request interceptor with CSRF support
+// Request interceptor
 client.interceptors.request.use(
   async (config) => {
     const startTime = Date.now();
     (config as any).metadata = { startTime };
 
-    console.log(`📤 ${config.method?.toUpperCase()} ${config.url}`);
+    console.log(`Request: ${config.method?.toUpperCase()} ${config.url}`);
 
     // Add Bearer token if available
     const token = tokenManager.getAccessToken();
@@ -201,16 +184,12 @@ client.interceptors.request.use(
         config.headers['X-CSRF-Token'] = csrfToken;
       } catch (error) {
         console.warn('Failed to get CSRF token for request:', error);
-        // Continue without CSRF token - let server handle it
       }
     }
 
-    // iOS helper header (no localStorage fallbacks)
-    const userAgent = navigator.userAgent;
-    if (/iPad|iPhone|iPod|CriOS|FxiOS/.test(userAgent)) {
-      if (token) {
-        config.headers['X-Access-Token'] = token;
-      }
+    // Ensure we always send valid JSON for POST requests
+    if (config.method?.toLowerCase() === 'post' && !config.data) {
+      config.data = {};
     }
 
     return config;
@@ -218,15 +197,14 @@ client.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-
-// Response interceptor with enhanced error handling
+// Response interceptor
 client.interceptors.response.use(
   (response) => {
     const cfg = response.config as AxiosRequestConfig & { metadata?: { startTime: number } };
     const duration = Date.now() - (cfg.metadata?.startTime ?? Date.now());
 
     if (duration > 30000) {
-      console.warn(`⚠️ Slow response (${duration}ms) - possible cold start`);
+      console.warn(`Slow response (${duration}ms) - possible cold start`);
     }
 
     return response;
@@ -244,7 +222,7 @@ client.interceptors.response.use(
 
     // Handle network errors
     if (!error.response && (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED')) {
-      console.error(`❌ Network error (${duration}ms):`, error.message);
+      console.error(`Network error (${duration}ms):`, error.message);
       
       if (duration > 30000) {
         toast.loading('Server is starting up, please wait...', { duration: 8000 });
@@ -255,7 +233,7 @@ client.interceptors.response.use(
 
     if (error.response) {
       const { status, data } = error.response;
-      console.error(`❌ ${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`);
+      console.error(`${status} ${originalRequest?.method?.toUpperCase()} ${originalRequest?.url} (${duration}ms)`);
 
       // Handle CSRF token errors
       if (status === 403 && data?.code === 'CSRF_ERROR') {
@@ -299,7 +277,7 @@ client.interceptors.response.use(
       switch (status) {
         case 403:
           if (data?.code !== 'CSRF_ERROR' && !originalRequest?.url?.includes('/health')) {
-            console.warn('🚫 Access forbidden');
+            console.warn('Access forbidden');
           }
           break;
         case 429:
@@ -308,7 +286,7 @@ client.interceptors.response.use(
           break;
         case 500:
           if (!originalRequest?.url?.includes('/health')) {
-            console.error('🔥 Server error occurred');
+            console.error('Server error occurred');
           }
           break;
       }

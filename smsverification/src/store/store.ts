@@ -1,21 +1,14 @@
+// src/store/store.ts - Simplified store without token persistence
 import { configureStore, combineReducers } from '@reduxjs/toolkit';
-import storage from 'redux-persist/lib/storage';
-import { persistReducer, persistStore } from 'redux-persist';
 
 import authReducer from './slices/authSlice';
 import dashboardReducer from './slices/dashboardSlice';
 import numbersReducer from './slices/numbersSlice';
 import servicesReducer from './slices/servicesSlice';
 
-// Persist config only for the auth slice
-const authPersistConfig = {
-  key: 'auth',
-  storage,
-  whitelist: ['user', 'isAuthenticated', 'accessToken'], // persist token too
-};
-
+// NO PERSISTENCE - rely entirely on httpOnly cookies for session management
 const rootReducer = combineReducers({
-  auth: persistReducer(authPersistConfig, authReducer),
+  auth: authReducer,
   dashboard: dashboardReducer,
   numbers: numbersReducer,
   services: servicesReducer,
@@ -26,13 +19,11 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE'],
+        ignoredActions: [],
       },
     }),
+  devTools: import.meta.env.DEV,
 });
-
-export const persistor = persistStore(store);
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
-

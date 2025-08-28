@@ -1,4 +1,4 @@
-// src/store/slices/authSlice.ts - Simplified and secure auth state management
+// src/store/slices/authSlice.ts - Fixed auth state management
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { authApi } from '@/api/auth';
 import { tokenManager } from '@/api/client';
@@ -50,12 +50,10 @@ export const logout = createAsyncThunk<void, void, { rejectValue: string }>(
     try {
       await authApi.logout();
     } finally {
-      // Only update Redux state here
       dispatch(sessionExpired());
     }
   }
 );
-
 
 export const initializeAuth = createAsyncThunk<
   { user: User | null; isAuthenticated: boolean },
@@ -65,15 +63,16 @@ export const initializeAuth = createAsyncThunk<
   'auth/initialize',
   async (_, { rejectWithValue }) => {
     try {
-      // Force server validation; ignore any persisted tokens
+      // This will attempt server validation via httpOnly cookies
       const result = await authApi.initializeAuth();
       return result;
     } catch (error: any) {
-      return rejectWithValue(error.message || 'Authentication initialization failed');
+      console.warn('Auth initialization failed:', error.message);
+      // Don't treat initialization failure as an error - just means not authenticated
+      return { user: null, isAuthenticated: false };
     }
   }
 );
-
 
 export const refreshTokens = createAsyncThunk<
   string,
@@ -88,21 +87,6 @@ export const refreshTokens = createAsyncThunk<
         throw new Error('Token refresh failed');
       }
       return newToken;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
-    }
-  }
-);
-
-export const fetchCurrentUser = createAsyncThunk<
-  User,
-  void,
-  { rejectValue: string }
->(
-  'auth/me',
-  async (_, { rejectWithValue }) => {
-    try {
-      return await authApi.me();
     } catch (error: any) {
       return rejectWithValue(error.message);
     }
@@ -127,7 +111,7 @@ const authSlice = createSlice({
       // Sync with token manager
       tokenManager.setAccessToken(accessToken);
 
-      console.log('Credentials set in Redux store');
+      console.log('✅ Credentials set for user:', user.username);
     },
 
     // Clear all credentials (for logout)
@@ -142,7 +126,7 @@ const authSlice = createSlice({
       // Clear from token manager
       tokenManager.clearTokens();
 
-      console.log('Credentials cleared from Redux store');
+      console.log('🧹 Credentials cleared from store');
     },
 
     // Update only the access token (for refresh)
@@ -155,7 +139,7 @@ const authSlice = createSlice({
       // Sync with token manager
       tokenManager.setAccessToken(accessToken);
 
-      console.log('Access token updated in Redux store');
+      console.log('🔄 Access token updated in store');
     },
 
     // Update user information
@@ -173,7 +157,9 @@ const authSlice = createSlice({
 
     // Update last activity
     updateActivity: (state) => {
-      state.lastActivity = Date.now();
+      if (state.isAuthenticated) {
+        state.lastActivity = Date.now();
+      }
     },
 
     // Handle session expiration
@@ -181,12 +167,13 @@ const authSlice = createSlice({
       state.user = null;
       state.accessToken = null;
       state.isAuthenticated = false;
-      state.error = 'Session expired. Please log in again.';
+      state.error = null; // Don't show session expired as error
+      state.lastActivity = null;
 
       // Clear from token manager
       tokenManager.clearTokens();
 
-      console.log('Session marked as expired');
+      console.log('⏰ Session expired - cleared credentials');
     }
   },
 
@@ -210,20 +197,25 @@ const authSlice = createSlice({
 
         if (isAuthenticated && user) {
           state.lastActivity = Date.now();
-          // Access token should already be set by the API call
+          console.log('✅ Auth initialized - user authenticated:', user.username);
+        } else {
+          console.log('ℹ️ Auth initialized - no active session');
         }
       })
-      .addCase(initializeAuth.rejected, (state, action) => {
+      .addCase(initializeAuth.rejected, (state) => {
         state.loading = false;
         state.initialized = true;
         state.isAuthenticated = false;
         state.user = null;
         state.accessToken = null;
-        state.error = action.payload || 'Authentication initialization failed';
+        state.error = null; // Don't show init failure as error
 
-        // Clear only in-memory tokens
+        // Clear tokens
         tokenManager.clearTokens();
+        
+        console.log('ℹ️ Auth initialization completed - not authenticated');
       })
+      
       // Login
       .addCase(login.pending, (state) => {
         state.loading = true;
@@ -242,6 +234,8 @@ const authSlice = createSlice({
 
         // Sync with token manager
         tokenManager.setAccessToken(accessToken);
+        
+        console.log('✅ Login successful for:', user.username);
       })
       .addCase(login.rejected, (state, action) => {
         state.loading = false;
@@ -252,6 +246,8 @@ const authSlice = createSlice({
 
         // Ensure token manager is cleared
         tokenManager.clearTokens();
+        
+        console.log('❌ Login failed:', action.payload);
       })
 
       // Logout
@@ -265,26 +261,26 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
         state.error = null;
         state.lastActivity = null;
-        state.initialized = true; // Keep initialized
+        state.initialized = true;
 
         // Clear from token manager
         tokenManager.clearTokens();
 
-        console.log('Logout completed in Redux');
+        console.log('✅ Logout completed');
       })
-      .addCase(logout.rejected, (state,) => {
+      .addCase(logout.rejected, (state) => {
         // Even if logout API fails, clear local state
         state.loading = false;
         state.user = null;
         state.accessToken = null;
         state.isAuthenticated = false;
         state.lastActivity = null;
-        state.error = null; // Don't show logout API errors
+        state.error = null;
 
         // Clear from token manager
         tokenManager.clearTokens();
 
-        console.log('Logout completed (with API error) in Redux');
+        console.log('✅ Logout completed (API failed, local cleanup done)');
       })
 
       // Refresh Tokens
@@ -292,28 +288,18 @@ const authSlice = createSlice({
         state.accessToken = action.payload;
         state.lastActivity = Date.now();
         state.error = null;
-
-        // Token manager already updated by the API call
       })
-      .addCase(refreshTokens.rejected, (state,) => {
+      .addCase(refreshTokens.rejected, (state) => {
         // On refresh failure, clear everything
         state.user = null;
         state.accessToken = null;
         state.isAuthenticated = false;
-        state.error = 'Session expired. Please log in again.';
+        state.error = null;
 
         // Clear from token manager
         tokenManager.clearTokens();
-      })
-
-      // Fetch Current User
-      .addCase(fetchCurrentUser.fulfilled, (state, action) => {
-        state.user = action.payload;
-        state.lastActivity = Date.now();
-        state.error = null;
-      })
-      .addCase(fetchCurrentUser.rejected, (state, action) => {
-        state.error = action.payload || 'Failed to fetch user information';
+        
+        console.log('❌ Token refresh failed - session expired');
       });
   },
 });

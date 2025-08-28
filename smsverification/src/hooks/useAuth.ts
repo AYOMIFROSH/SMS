@@ -1,4 +1,4 @@
-// src/hooks/useAuth.ts - Simplified and reliable authentication hook
+// src/hooks/useAuth.ts - Fixed authentication hook
 import { useSelector, useDispatch } from 'react-redux';
 import { useEffect, useCallback, useRef } from 'react';
 import { RootState, AppDispatch } from '@/store/store';
@@ -18,32 +18,21 @@ const useAuth = () => {
   const initializationPromise = useRef<Promise<any> | null>(null);
   const hasInitialized = useRef(false);
 
-  // Track whether redirects are allowed
-  const canRedirect = useRef(false);
-
-  // Initialize authentication on mount (only once)
+  // Initialize authentication on mount - ALWAYS run, don't depend on persisted token
   useEffect(() => {
-  // Only initialize auth if we have a persisted accessToken
-  if (!hasInitialized.current && !auth.initialized && !auth.loading && auth.accessToken) {
-    console.log('🚀 Starting auth initialization...');
-    hasInitialized.current = true;
+    // Only initialize once per app load
+    if (!hasInitialized.current && !auth.initialized && !auth.loading) {
+      console.log('🚀 Starting auth initialization...');
+      hasInitialized.current = true;
 
-    if (!initializationPromise.current) {
-      initializationPromise.current = dispatch(initializeAuth())
-        .finally(() => {
-          initializationPromise.current = null;
-        });
+      if (!initializationPromise.current) {
+        initializationPromise.current = dispatch(initializeAuth())
+          .finally(() => {
+            initializationPromise.current = null;
+          });
+      }
     }
-  }
-}, [dispatch, auth.initialized, auth.loading, auth.accessToken]);
-
-
-  // Allow redirect only after initialization
-  useEffect(() => {
-    if (auth.initialized) {
-      canRedirect.current = true;
-    }
-  }, [auth.initialized]);
+  }, [dispatch, auth.initialized, auth.loading]);
 
   // Listen for session expiration events
   useEffect(() => {
@@ -53,17 +42,14 @@ const useAuth = () => {
 
       dispatch(sessionExpired());
 
-      // Only redirect if initialization done and redirect allowed
-      if (!auth.initialized || !canRedirect.current) {
-        console.log('ℹ️ Session expired during initialization — deferring redirect.');
-        return;
+      // Only redirect after initialization is complete
+      if (auth.initialized) {
+        setTimeout(() => {
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }, 100);
       }
-
-      setTimeout(() => {
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
-      }, 200); // small delay for UX
     };
 
     const handleTokenUpdated = (event: Event) => {
@@ -92,9 +78,9 @@ const useAuth = () => {
     }
   }, [auth.accessToken]);
 
-  // Activity tracking
+  // Activity tracking - only when fully authenticated
   useEffect(() => {
-    if (!auth.isAuthenticated) return;
+    if (!auth.isAuthenticated || !auth.initialized) return;
 
     const trackActivity = () => {
       if (auth.isAuthenticated) {
@@ -112,7 +98,7 @@ const useAuth = () => {
         document.removeEventListener(event, trackActivity);
       });
     };
-  }, [dispatch, auth.isAuthenticated]);
+  }, [dispatch, auth.isAuthenticated, auth.initialized]);
 
   // Logout function
   const logout = useCallback(async (): Promise<void> => {
@@ -121,7 +107,7 @@ const useAuth = () => {
       await dispatch(logoutThunk()).unwrap();
       console.log('✅ Logout completed successfully');
       hasInitialized.current = false;
-      canRedirect.current = true;
+      
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
@@ -129,24 +115,10 @@ const useAuth = () => {
       console.warn('⚠️ Logout API call failed, local cleanup completed:', error);
       dispatch(clearCredentials());
       hasInitialized.current = false;
-      canRedirect.current = true;
+      
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
-    }
-  }, [dispatch]);
-
-  // Manual re-initialization
-  const reinitialize = useCallback(async (): Promise<boolean> => {
-    try {
-      console.log('Manual auth reinitialization...');
-      hasInitialized.current = false;
-      await dispatch(initializeAuth()).unwrap();
-      hasInitialized.current = true;
-      return true;
-    } catch (error) {
-      console.error('Manual reinitialization failed:', error);
-      return false;
     }
   }, [dispatch]);
 
@@ -160,22 +132,6 @@ const useAuth = () => {
     );
   }, [auth.isAuthenticated, auth.user, auth.accessToken, auth.initialized]);
 
-  // Session info
-  const getSessionInfo = useCallback(() => ({
-    isValid: hasValidAuth(),
-    user: auth.user,
-    lastActivity: auth.lastActivity,
-    timeSinceActivity: auth.lastActivity ? Date.now() - auth.lastActivity : null,
-    sessionAge: auth.lastActivity ? Date.now() - auth.lastActivity : null
-  }), [auth.user, auth.lastActivity, hasValidAuth]);
-
-  // Session stale
-  const isSessionStale = useCallback((thresholdMinutes = 30): boolean => {
-    if (!auth.lastActivity) return false;
-    const threshold = thresholdMinutes * 60 * 1000;
-    return (Date.now() - auth.lastActivity) > threshold;
-  }, [auth.lastActivity]);
-
   return {
     user: auth.user,
     isAuthenticated: auth.isAuthenticated,
@@ -184,13 +140,12 @@ const useAuth = () => {
     initialized: auth.initialized,
     hasAccessToken: Boolean(auth.accessToken),
     logout,
-    reinitialize,
     hasValidAuth,
-    getSessionInfo,
-    isSessionStale,
+    
+    // Simplified state checks
     isReady: auth.initialized && !auth.loading,
     needsLogin: auth.initialized && !auth.isAuthenticated,
-    isInitializing: !auth.initialized && auth.loading,
+    isInitializing: !auth.initialized && (auth.loading || !hasInitialized.current),
     hasError: Boolean(auth.error),
     errorMessage: auth.error
   };
