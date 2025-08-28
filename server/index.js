@@ -15,6 +15,7 @@ const { setupRedis, getRedisClient } = require('./Config/redis');
 const sessionService = require('./services/sessionService');
 const logger = require('./utils/logger');
 const webSocketService = require('./services/webhookService');
+const mobileOptimizationMiddleware = require('./middleware/mobile');
 
 const app = express();
 const server = http.createServer(app);
@@ -119,6 +120,10 @@ const corsOptions = {
     'CSRF-Token',
     'x-csrf-token',
     'csrf-token',
+    'X-Mobile-Client',
+    'X-Mobile-Platform',
+    'Cache-Control',
+    'Pragma',
     // iOS fallback headers
     'X-Access-Token',
     'X-Session-Token',
@@ -276,7 +281,7 @@ app.get('/', (req, res) => {
 });
 
 // API Routes with CSRF protection where needed
-app.use('/api/auth', require('./routes/auth'));
+app.use('/api/auth', mobileOptimizationMiddleware, require('./routes/auth'));
 app.use('/api/dashboard', csrfProtection, require('./routes/dashboard'));
 app.use('/api/numbers', csrfProtection, require('./routes/numbers'));
 app.use('/api/services', require('./routes/services')); // Read-only, no CSRF needed
