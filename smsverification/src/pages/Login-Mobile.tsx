@@ -103,7 +103,7 @@ const Login: React.FC = () => {
         // Clear any mobile auth issue flags
         sessionStorage.removeItem('mobile_auth_issue');
       } else {
-        toast.success("Login successful!");
+        // toast.success("Login successful!");
       }
       
     } catch (error: any) {
