@@ -156,6 +156,9 @@ const client = axios.create({
   headers: {
     'Content-Type': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
+    // Add these for mobile detection
+    'X-Mobile-Client': /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'true' : 'false',
+    'X-Mobile-Platform': /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'ios' : 'android'
   },
 });
 

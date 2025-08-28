@@ -1,4 +1,4 @@
-// src/pages/Login.tsx - Secure login with proper error handling and CSRF protection
+// src/pages/Login-Mobile.tsx - Mobile-aware login with better cookie handling
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import LoadingSpinner from "@/components/common/LoadingSpinner";
 import { login as loginThunk } from "@/store/slices/authSlice";
 import useAuth from "@/hooks/useAuth";
+import useMobileAuth from "@/hooks/useMobileAuth";
 import type { AppDispatch } from "@/store/store";
 
 interface LoginFormData {
@@ -17,6 +18,7 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
   const { isAuthenticated, isReady, isInitializing } = useAuth();
+  const { isMobile, hasMobileAuthIssue } = useMobileAuth();
 
   const [formData, setFormData] = useState<LoginFormData>({
     username: "",
@@ -24,18 +26,31 @@ const Login: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [formErrors, setFormErrors] = useState<Partial<LoginFormData>>({});
+  const [loginAttempts, setLoginAttempts] = useState(0);
 
-  // Redirect if already authenticated
-useEffect(() => {
-  if (isAuthenticated && isReady) {
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const redirectDelay = isMobile ? 1500 : 300; // Longer delay for mobile
-    
-    setTimeout(() => {
-      navigate("/", { replace: true });
-    }, redirectDelay);
-  }
-}, [isAuthenticated, isReady, navigate]);
+  // Handle mobile auth issues
+  useEffect(() => {
+    if (hasMobileAuthIssue) {
+      toast.error(
+        'Mobile authentication issues detected. Try clearing your browser data.', 
+        { duration: 10000, id: 'mobile-auth-warning' }
+      );
+    }
+  }, [hasMobileAuthIssue]);
+
+  // Redirect if authenticated with mobile-specific delay
+  useEffect(() => {
+    if (isAuthenticated && isReady) {
+      console.log('User authenticated, redirecting...');
+      
+      // Add extra delay for mobile browsers to ensure state is stable
+      const redirectDelay = isMobile ? 1000 : 300;
+      
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, redirectDelay);
+    }
+  }, [isAuthenticated, isReady, navigate, isMobile]);
 
   const validateForm = (): boolean => {
     const errors: Partial<LoginFormData> = {};
@@ -60,7 +75,6 @@ useEffect(() => {
     const value = e.target.value;
     setFormData(prev => ({ ...prev, [field]: value }));
     
-    // Clear field error when user starts typing
     if (formErrors[field]) {
       setFormErrors(prev => ({ ...prev, [field]: undefined }));
     }
@@ -72,26 +86,35 @@ useEffect(() => {
     if (!validateForm()) return;
 
     setLoading(true);
+    setLoginAttempts(prev => prev + 1);
 
     try {
-      console.log('Attempting login for username:', formData.username);
+      console.log(`Login attempt ${loginAttempts + 1} for:`, formData.username);
 
       await dispatch(loginThunk({
         username: formData.username.trim(),
         password: formData.password
       })).unwrap();
 
-      toast.success("Login successful!");
-      
-      // Navigation will be handled by the useEffect above
+      // Mobile-specific success handling
+      if (isMobile) {
+        toast.success("Login successful! Loading dashboard...", { duration: 3000 });
+        
+        // Clear any mobile auth issue flags
+        sessionStorage.removeItem('mobile_auth_issue');
+      } else {
+        toast.success("Login successful!");
+      }
       
     } catch (error: any) {
       console.error('Login failed:', error);
       
-      // Handle specific error types
       let errorMessage = "Login failed. Please try again.";
       
-      if (error.includes?.('not found')) {
+      // Mobile-specific error handling
+      if (isMobile && error.includes?.('Network')) {
+        errorMessage = "Network error. Check your internet connection and try again.";
+      } else if (error.includes?.('not found')) {
         errorMessage = "Account not found with this username or email";
       } else if (error.includes?.('password')) {
         errorMessage = "Incorrect password provided";
@@ -103,9 +126,15 @@ useEffect(() => {
         errorMessage = error;
       }
 
-      toast.error(errorMessage);
+      // Show mobile-specific guidance for repeated failures
+      if (isMobile && loginAttempts >= 2) {
+        errorMessage += " On mobile, try refreshing the page or switching networks.";
+      }
+
+      toast.error(errorMessage, { 
+        duration: isMobile ? 8000 : 5000 
+      });
       
-      // Clear password on error
       setFormData(prev => ({ ...prev, password: "" }));
       
     } finally {
@@ -113,13 +142,20 @@ useEffect(() => {
     }
   };
 
-  // Show loading state during auth initialization
+  // Mobile-specific loading state
   if (isInitializing) {
     return (
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
         <div className="text-center">
           <LoadingSpinner size="lg" />
-          <p className="mt-4 text-slate-600">Checking authentication...</p>
+          <p className="mt-4 text-slate-600">
+            {isMobile ? "Checking mobile session..." : "Checking authentication..."}
+          </p>
+          {isMobile && (
+            <p className="mt-2 text-sm text-slate-500">
+              This may take longer on mobile networks
+            </p>
+          )}
         </div>
       </div>
     );
@@ -139,7 +175,29 @@ useEffect(() => {
             <p className="text-slate-600">
               Please sign in to your SMS Security account
             </p>
+            {isMobile && (
+              <p className="mt-2 text-sm text-blue-600">
+                Mobile optimized login
+              </p>
+            )}
           </div>
+
+          {/* Mobile-specific warnings */}
+          {isMobile && loginAttempts >= 2 && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex">
+                <svg className="w-5 h-5 text-yellow-400 mr-2 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-yellow-800">Mobile Login Issues?</p>
+                  <p className="text-sm text-yellow-700 mt-1">
+                    Try refreshing the page, clearing browser data, or switching between WiFi and mobile data.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <form className="space-y-6" onSubmit={handleSubmit} noValidate>
             <div>
@@ -158,6 +216,7 @@ useEffect(() => {
                   w-full px-4 py-3 bg-white border rounded-lg 
                   focus:outline-none focus:ring-2 transition-all duration-200 
                   text-slate-800 placeholder-slate-500
+                  ${isMobile ? 'text-base' : 'text-sm'} // Prevent iOS zoom
                   ${formErrors.username 
                     ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
                     : 'border-slate-300 focus:ring-blue-500 focus:border-blue-500'
@@ -189,6 +248,7 @@ useEffect(() => {
                   w-full px-4 py-3 bg-white border rounded-lg 
                   focus:outline-none focus:ring-2 transition-all duration-200 
                   text-slate-800 placeholder-slate-500
+                  ${isMobile ? 'text-base' : 'text-sm'} // Prevent iOS zoom
                   ${formErrors.password 
                     ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
                     : 'border-slate-300 focus:ring-blue-500 focus:border-blue-500'
@@ -211,17 +271,19 @@ useEffect(() => {
                 w-full py-3 px-4 text-white font-semibold rounded-lg 
                 transition-all duration-200 flex justify-center items-center 
                 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
+                ${isMobile ? 'min-h-[48px]' : ''} // Better mobile touch targets
                 ${isFormValid
                   ? 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl transform hover:-translate-y-0.5'
                   : 'bg-slate-400 cursor-not-allowed'
                 }
               `}
-              aria-label="Sign in to your account"
             >
               {loading ? (
                 <>
                   <LoadingSpinner size="sm" color="white" />
-                  <span className="ml-2">Signing In...</span>
+                  <span className="ml-2">
+                    {isMobile ? 'Signing In (Mobile)...' : 'Signing In...'}
+                  </span>
                 </>
               ) : (
                 "Sign In"
@@ -239,13 +301,13 @@ useEffect(() => {
               <span>•</span>
               <span>End-to-End Encrypted</span>
               <span>•</span>
-              <span>Session Secure</span>
+              <span>{isMobile ? 'Mobile Optimized' : 'Session Secure'}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Right Side - Branding */}
+      {/* Right Side - Branding (hidden on mobile for better UX) */}
       <div className="hidden lg:flex flex-1 bg-gradient-to-br from-blue-600 to-indigo-700 items-center justify-center relative overflow-hidden">
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
@@ -256,7 +318,6 @@ useEffect(() => {
 
         {/* Content */}
         <div className="relative text-center text-white z-10 max-w-md">
-          {/* Logo */}
           <div className="mb-8">
             <div className="w-24 h-24 mx-auto bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mb-6 shadow-2xl">
               <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -295,7 +356,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Bottom accent */}
           <div className="mt-8 pt-6 border-t border-blue-400/30">
             <p className="text-sm text-blue-200">
               Trusted by developers worldwide
@@ -307,4 +367,4 @@ useEffect(() => {
   );
 };
 
-export default Login;
+export default Login;2
