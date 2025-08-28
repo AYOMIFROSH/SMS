@@ -89,7 +89,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'https://mysmsnumber.vercel.app
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
-      process.env.FRONTEND_URL || 'https://yourapp.vercel.app',
+      process.env.FRONTEND_URL || 'https://sms.fizzbuzzup.com',
       ...(process.env.NODE_ENV !== 'production' ? [
         'http://localhost:3000',
         'http://localhost:5173',
