@@ -29,7 +29,7 @@ const Login: React.FC = () => {
 useEffect(() => {
   if (isAuthenticated && isReady) {
     const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const redirectDelay = isMobile ? 1500 : 300; // Longer delay for mobile
+    const redirectDelay = isMobile ? 500 : 200; // Longer delay for mobile
     
     setTimeout(() => {
       navigate("/", { replace: true });
