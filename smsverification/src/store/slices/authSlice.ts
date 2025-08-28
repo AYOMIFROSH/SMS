@@ -63,13 +63,21 @@ export const initializeAuth = createAsyncThunk<
   'auth/initialize',
   async (_, { rejectWithValue }) => {
     try {
-      // This will attempt server validation via httpOnly cookies
       const result = await authApi.initializeAuth();
       return result;
     } catch (error: any) {
-      console.warn('Auth initialization failed:', error.message);
-      // Don't treat initialization failure as an error - just means not authenticated
-      return { user: null, isAuthenticated: false };
+      // Differentiate between "no session" vs "server error"
+      if (error.message?.includes('No valid refresh token') || 
+          error.response?.status === 401 ||
+          error.response?.status === 403) {
+        // These are expected "no session" cases - return unauthenticated state
+        console.log('No valid session found during initialization');
+        return { user: null, isAuthenticated: false };
+      }
+      
+      // Actual server/network errors should be rejected
+      console.error('Auth initialization server error:', error.message);
+      return rejectWithValue(error.message || 'Authentication initialization failed');
     }
   }
 );
