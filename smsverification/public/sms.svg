@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 160" width="360" height="160" role="img" aria-label="SMS BuzzUp logo">
+  <defs>
+    <!-- Arrowhead marker -->
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ff1a1a"/>
+    </marker>
+  </defs>
+
+  <!-- small left dots -->
+  <rect x="48" y="98" width="8" height="8" rx="2" fill="#ff1a1a"/>
+  <rect x="66" y="98" width="8" height="8" rx="2" fill="#ff1a1a"/>
+  <rect x="84" y="98" width="8" height="8" rx="2" fill="#ff1a1a"/>
+
+  <!-- rising bars -->
+  <rect x="112" y="100" width="14" height="10" rx="3" fill="#ff1a1a"/>
+  <rect x="142" y="90"  width="14" height="20" rx="3" fill="#ff1a1a"/>
+  <rect x="172" y="70"  width="14" height="40" rx="3" fill="#ff1a1a"/>
+  <rect x="202" y="46"  width="14" height="64" rx="3" fill="#ff1a1a"/>
+
+  <!-- curved rising arrow -->
+  <path d="M50 108
+           C 110 88, 170 46, 242 30"
+        fill="none"
+        stroke="#ff1a1a"
+        stroke-width="8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        marker-end="url(#arrowhead)"/>
+
+  <!-- Text: SMS BuzzUp -->
+  <text x="180" y="145" font-family="Verdana, Arial, Helvetica, sans-serif" font-weight="700" font-size="18" text-anchor="middle" fill="#ff1a1a" letter-spacing="1">
+    SMS BuzzUp
+  </text>
+</svg>
