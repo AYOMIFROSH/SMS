@@ -93,14 +93,25 @@ const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 // Main app content component
 const AppContent: React.FC = () => {
   const { isAuthenticated, isReady, needsLogin, isInitializing, hasError, errorMessage } = useAuth();
+  const [showConnected, setShowConnected] = useState(false);
+
 
 
   // Initialize WebSocket connection only when fully authenticated and ready
-const ws = useWebSocket(undefined, true) || {};
-const { isConnected: wsConnected = false, connectionError: wsError = null } = ws;
-const hasConnectionIssue = !wsConnected && Boolean(wsError);
+  const ws = useWebSocket(undefined, true) || {};
+  const { isConnected: wsConnected = false, connectionError: wsError = null } = ws;
+  const hasConnectionIssue = !wsConnected && Boolean(wsError);
 
 
+  useEffect(() => {
+    if (wsConnected) {
+      setShowConnected(true);
+      const timer = setTimeout(() => {
+        setShowConnected(false);
+      }, 3500); // 3.5 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [wsConnected]);
 
   console.log('App render state:', {
     isAuthenticated,
@@ -256,17 +267,17 @@ const hasConnectionIssue = !wsConnected && Boolean(wsError);
                 </svg>
                 <span>Connection Issue</span>
               </div>
-            ) : wsConnected ? (
+            ) : wsConnected && showConnected ? (
               <div className="flex items-center space-x-2 bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg text-sm opacity-75 hover:opacity-100 transition-opacity">
                 <div className="w-2 h-2 bg-green-200 rounded-full animate-pulse"></div>
                 <span>Connected</span>
               </div>
-            ) : (
+            ) : !wsConnected && !wsError ? (
               <div className="flex items-center space-x-2 bg-yellow-500 text-white px-3 py-2 rounded-lg shadow-lg text-sm">
                 <div className="w-2 h-2 bg-yellow-200 rounded-full animate-pulse"></div>
                 <span>Connecting...</span>
               </div>
-            )}
+            ) : null}
           </div>
         )}
 
