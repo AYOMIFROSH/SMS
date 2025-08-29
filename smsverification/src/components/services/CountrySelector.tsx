@@ -137,7 +137,7 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
 
       {/* Desktop Header */}
       <div className="hidden lg:block mb-6">
-        <h3 className="text-lg font-medium text-gray-500 mb-4">Select Country</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Select Country</h3>
       </div>
       
       {/* Search and Filter Bar */}
