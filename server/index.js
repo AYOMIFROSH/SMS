@@ -9,6 +9,9 @@ const session = require('express-session');
 const { RedisStore } = require('connect-redis');
 const csrf = require('csurf');
 const http = require('http');
+const favicon = require('serve-favicon');
+const path = require('path');
+const fs = require('fs');
 
 const { setupDatabase, initializeTables } = require('./Config/database');
 const { setupRedis, getRedisClient } = require('./Config/redis');
@@ -20,6 +23,19 @@ const mobileOptimizationMiddleware = require('./middleware/mobile');
 const app = express();
 const server = http.createServer(app);
 
+const assetsPath = path.join(__dirname, 'assets');
+
+// serve static files from /assets for debugging or other assets
+app.use('/assets', express.static(assetsPath));
+
+// favicon path
+const icoPath = path.join(assetsPath, 'sms-buzzup.ico');
+
+// check file exists
+console.log('favicon ->', icoPath, 'exists?', fs.existsSync(icoPath));
+
+// middleware for favicon in browser tab
+app.use(favicon(icoPath, { maxAge: 7 * 24 * 60 * 60 * 1000 }));
 // Trust proxy for accurate client IPs
 app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
@@ -163,6 +179,9 @@ app.use(express.urlencoded({
   limit: '10mb'
 }));
 
+
+
+
 // Request logging middleware
 app.use((req, res, next) => {
   req.requestId = require('crypto').randomUUID();
@@ -228,6 +247,8 @@ app.get('/api/csrf-token', csrfProtection, (req, res) => {
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   });
 });
+
+
 
 // Health check endpoint (no auth/CSRF required)
 app.get('/api/health', async (req, res) => {
@@ -383,6 +404,8 @@ app.get('/api/docs', (req, res) => {
     }
   });
 });
+
+
 
 // 404 handler
 app.use('/api/*', (req, res) => {
