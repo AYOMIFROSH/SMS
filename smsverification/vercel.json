@@ -2,11 +2,11 @@
   "rewrites": [
     { 
       "source": "/api/:path*", 
-      "destination": "https://mysmsnumber.onrender.com/:path*" 
+      "destination": "https://api.fizzbuzzup.com/:path*" 
     },
     {
       "source": "/ws/:path*",
-      "destination": "https://mysmsnumber.onrender.com/ws/:path*"
+      "destination": "https://api.fizzbuzzup.com/ws/:path*"
     },
     {
       "source": "/(.*)",
