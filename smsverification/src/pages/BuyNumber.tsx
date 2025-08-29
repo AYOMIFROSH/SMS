@@ -274,7 +274,7 @@ const BuyNumber: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 lg:bg-transparent">
       {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0 z-20">
+      <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0.5 z-30">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -384,10 +384,10 @@ const BuyNumber: React.FC = () => {
 
       {/* Desktop Header - Hidden on mobile */}
       <div className="hidden lg:block">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Buy SMS Number</h1>
-            <p className="text-gray-600 mt-1">Select a country, service, and operator to purchase an SMS number.</p>
+            <h1 className="text-2xl font-bold text-gray-500">Buy SMS Number</h1>
+            <p className="text-gray-300 mt-1">Select a country, service, and operator to purchase an SMS number.</p>
           </div>
           
           <div className="flex flex-col sm:flex-row gap-3">
@@ -412,7 +412,7 @@ const BuyNumber: React.FC = () => {
         </div>
 
         {/* Desktop Progress Steps */}
-        <div className="flex items-center justify-center space-x-4 lg:space-x-8 py-4 mb-6">
+        <div className="flex items-center justify-center space-x-4 lg:space-x-4 py-4 mb-6">
           <StepIndicator 
             step={1} 
             title="Select Country" 
