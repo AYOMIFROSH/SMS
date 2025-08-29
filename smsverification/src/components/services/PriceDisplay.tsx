@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { DollarSign, AlertCircle, CheckCircle, Info, CreditCard, Shield, Clock, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import { Link } from 'react-router-dom';
 
 interface PriceDisplayProps {
   price: number | null;
@@ -221,8 +222,8 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
             {/* Top-up suggestion for insufficient balance */}
             {!canAfford && (
               <div className="mt-3 pt-3 border-t border-red-200">
-                <button className="text-sm font-medium text-red-700 hover:text-red-800 transition-colors underline">
-                  Top up your account
+                <button  className="text-sm font-medium text-red-700 hover:text-red-800 transition-colors underline">
+                  <Link to='/transactions'>Top up your account</Link>
                 </button>
               </div>
             )}
