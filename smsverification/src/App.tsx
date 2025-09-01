@@ -17,6 +17,8 @@ import LoadingSpinner from './components/common/LoadingSpinner';
 import useWebSocket from './hooks/useWebsocket';
 import useAuth from '@/hooks/useAuth';
 import { healthCheck } from '@/api/client';
+import { Analytics } from '@vercel/analytics/react';
+
 
 // Security headers check component
 const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -159,6 +161,8 @@ const AppContent: React.FC = () => {
 
   return (
     <Router>
+      {import.meta.env.PROD && <Analytics />}
+
       <div className="App">
         <Routes>
           {/* Public Routes */}
