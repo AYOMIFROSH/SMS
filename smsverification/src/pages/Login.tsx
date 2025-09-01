@@ -81,7 +81,7 @@ useEffect(() => {
         password: formData.password
       })).unwrap();
 
-      toast.success("Login successful!");
+      // toast.success("Login successful!");
       
       // Navigation will be handled by the useEffect above
       
