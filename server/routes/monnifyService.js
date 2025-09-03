@@ -1,413 +1,270 @@
-// services/monnifyService.js - COMPREHENSIVE MONNIFY PAYMENT INTEGRATION
+// services/monnifyService.js - Fixed with correct Monnify API endpoints
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { getPool } = require('../Config/database');
-const cacheService = require('./cacheServices');
 
 class MonnifyService {
   constructor() {
-    // Monnify Configuration
-    this.baseURL = process.env.MONNIFY_BASE_URL || 'https://api.monnify.com';
-    this.sandboxURL = 'https://sandbox.monnify.com'; // For testing
+    this.baseUrl = process.env.MONNIFY_BASE_URL.replace(/\/+$/, '');
     this.apiKey = process.env.MONNIFY_API_KEY;
     this.secretKey = process.env.MONNIFY_SECRET_KEY;
     this.contractCode = process.env.MONNIFY_CONTRACT_CODE;
-    this.walletId = process.env.MONNIFY_WALLET_ID;
-    
-    // Environment check
-    this.isProduction = process.env.NODE_ENV === 'production';
-    this.currentBaseURL = this.isProduction ? this.baseURL : this.sandboxURL;
-    
-    // Rate limiting and retry configuration
-    this.retryAttempts = 3;
-    this.retryDelay = 1000; // 1 second
-    
-    // Webhook verification
-    this.webhookSecret = process.env.MONNIFY_WEBHOOK_SECRET;
+    this.currency = 'NGN';
+    this.accessToken = null;
+    this.tokenExpiry = null;
+
+    this.validateConfiguration();
     
     logger.info('Monnify Service initialized:', {
-      environment: this.isProduction ? 'production' : 'sandbox',
-      baseURL: this.currentBaseURL
+      environment: process.env.NODE_ENV,
+      baseUrl: this.baseUrl,
+      contractCode: this.contractCode
     });
   }
 
-  // Authentication - Generate Bearer Token
+  validateConfiguration() {
+    const requiredVars = ['MONNIFY_API_KEY', 'MONNIFY_SECRET_KEY', 'MONNIFY_CONTRACT_CODE'];
+    const missing = requiredVars.filter(varName => !process.env[varName]);
+
+    if (missing.length > 0) {
+      const msg = `Missing Monnify configuration: ${missing.join(', ')}`;
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(msg);
+      } else {
+        logger.warn(msg + ' — continuing in development mode');
+      }
+    }
+  }
+
+  // Authentication
   async authenticate() {
     try {
-      const cacheKey = 'monnify:auth_token';
-      const cached = await cacheService.get(cacheKey);
-      if (cached && cached.expires > Date.now()) {
-        return cached.token;
+      if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+        return this.accessToken;
       }
 
-      const authString = Buffer.from(`${this.apiKey}:${this.secretKey}`).toString('base64');
-      
+      const credentials = Buffer.from(`${this.apiKey}:${this.secretKey}`).toString('base64');
+
       const response = await axios.post(
-        `${this.currentBaseURL}/api/v1/auth/login`,
+        `${this.baseUrl}/api/v1/auth/login`,
         {},
         {
           headers: {
-            'Authorization': `Basic ${authString}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Basic ${credentials}`
           },
           timeout: 30000
         }
       );
 
-      if (response.data.requestSuccessful) {
-        const { accessToken, expiresIn } = response.data.responseBody;
-        const expiryTime = Date.now() + (expiresIn * 1000) - 300000; // 5 minutes buffer
-        
-        // Cache token
-        await cacheService.set(cacheKey, {
-          token: accessToken,
-          expires: expiryTime
-        }, expiresIn - 300); // Cache for slightly less than expiry
-
+      if (response?.data?.requestSuccessful) {
+        this.accessToken = response.data.responseBody?.accessToken;
+        this.tokenExpiry = Date.now() + (50 * 60 * 1000); // 50 minutes
         logger.info('Monnify authentication successful');
-        return accessToken;
+        return this.accessToken;
       }
-      
-      throw new Error('Authentication failed');
+
+      throw new Error(response?.data?.responseMessage || 'Authentication failed');
     } catch (error) {
       logger.error('Monnify authentication error:', error.message);
       throw new Error(`Authentication failed: ${error.message}`);
     }
   }
 
-  // Make authenticated API request with retry logic
-  async makeRequest(method, endpoint, data = null, retryCount = 0) {
+  // Make API request
+  async makeRequest(method, endpoint, data = null) {
     try {
       const token = await this.authenticate();
-      
+
       const config = {
-        method: method.toUpperCase(),
-        url: `${this.currentBaseURL}/api/v1/${endpoint}`,
+        method,
+        url: `${this.baseUrl}${endpoint}`,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
-        timeout: 60000 // 60 seconds for transactions
+        timeout: 45000
       };
 
-      if (data && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
-        config.data = data;
-      }
-
-      logger.info('Monnify API Request:', {
-        method: method.toUpperCase(),
-        endpoint,
-        hasData: !!data
-      });
+      if (data) config.data = data;
 
       const response = await axios(config);
-      
-      logger.info('Monnify API Response:', {
-        endpoint,
-        success: response.data.requestSuccessful,
-        status: response.status
-      });
+
+      if (!response?.data?.requestSuccessful) {
+        throw new Error(response?.data?.responseMessage || 'Request failed');
+      }
 
       return response.data;
     } catch (error) {
-      logger.error('Monnify API Error:', {
+      logger.error('Monnify API request failed:', {
+        method,
         endpoint,
-        error: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-        retryCount
+        error: error.message
       });
 
-      // Retry logic for specific errors
-      if (retryCount < this.retryAttempts && this.shouldRetry(error)) {
-        await this.delay(this.retryDelay * (retryCount + 1));
-        return this.makeRequest(method, endpoint, data, retryCount + 1);
+      if (error.response?.status === 401) {
+        this.accessToken = null;
+        this.tokenExpiry = null;
       }
 
-      throw this.enhanceError(error);
-    }
-  }
-
-  // Initialize one-time payment for user deposits
-  async initializePayment({ 
-    amount, 
-    userId, 
-    customerName, 
-    customerEmail,
-    paymentDescription = "SMS Platform Balance Top-up",
-    currencyCode = "NGN",
-    paymentMethods = ["CARD", "ACCOUNT_TRANSFER", "USSD"],
-    redirectUrl = null
-  }) {
-    try {
-      const paymentReference = this.generatePaymentReference('DEP', userId);
-      
-      const paymentData = {
-        amount: parseFloat(amount),
-        customerName,
-        customerEmail,
-        paymentReference,
-        paymentDescription,
-        currencyCode,
-        contractCode: this.contractCode,
-        redirectUrl: redirectUrl || `${process.env.FRONTEND_URL}/dashboard?payment=success`,
-        paymentMethods,
-        incomeSplitConfig: [], // Can be configured for commission splits
-        metaData: {
-          userId: userId.toString(),
-          platform: 'SMS_PLATFORM',
-          type: 'BALANCE_TOPUP',
-          timestamp: new Date().toISOString()
-        }
-      };
-
-      logger.info('Initializing Monnify payment:', {
-        userId,
-        amount,
-        reference: paymentReference
-      });
-
-      const response = await this.makeRequest('POST', 'merchant/transactions/init-transaction', paymentData);
-
-      if (response.requestSuccessful) {
-        const { 
-          transactionReference,
-          paymentReference: monnifyPaymentRef,
-          checkoutUrl,
-          enabledPaymentMethod
-        } = response.responseBody;
-
-        // Store pending transaction in database
-        const pool = getPool();
-        await pool.execute(
-          `INSERT INTO monnify_transactions 
-           (user_id, payment_reference, transaction_reference, amount, status, 
-            payment_description, customer_email, created_at)
-           VALUES (?, ?, ?, ?, 'PENDING', ?, ?, NOW())`,
-          [userId, paymentReference, transactionReference, amount, paymentDescription, customerEmail]
-        );
-
-        return {
-          success: true,
-          paymentReference,
-          transactionReference,
-          checkoutUrl,
-          amount,
-          enabledPaymentMethods: enabledPaymentMethod
-        };
-      }
-
-      throw new Error('Payment initialization failed');
-    } catch (error) {
-      logger.error('Initialize payment error:', error);
       throw error;
     }
   }
 
-  // Verify payment status
-  async verifyPayment(transactionReference) {
-    try {
-      logger.info('Verifying payment:', { transactionReference });
-
-      const response = await this.makeRequest('GET', `merchant/transactions/query?paymentReference=${transactionReference}`);
-
-      if (response.requestSuccessful) {
-        const transaction = response.responseBody;
-        
-        return {
-          success: true,
-          transactionReference: transaction.transactionReference,
-          paymentReference: transaction.paymentReference,
-          amount: transaction.amountPaid,
-          fee: transaction.fee,
-          status: transaction.paymentStatus,
-          paymentMethod: transaction.paymentMethod,
-          paidOn: transaction.paidOn,
-          customer: {
-            email: transaction.customer?.email,
-            name: transaction.customer?.name
-          }
-        };
-      }
-
-      return { success: false, error: 'Verification failed' };
-    } catch (error) {
-      logger.error('Verify payment error:', error);
-      throw error;
-    }
-  }
-
-  // Process successful payment and update user balance
-  async processSuccessfulPayment(transactionReference) {
+  // Initialize transaction
+  async initializeTransaction(userId, amount, userInfo = {}) {
     const pool = getPool();
     
     try {
-      await pool.execute('START TRANSACTION');
+      const paymentReference = this.generatePaymentReference(userId);
 
-      // Get transaction details from our database
-      const [transactions] = await pool.execute(
-        'SELECT * FROM monnify_transactions WHERE transaction_reference = ?',
-        [transactionReference]
+      const payload = {
+        amount: parseFloat(amount),
+        customerName: userInfo.name || `User ${userId}`,
+        customerEmail: userInfo.email || `user${userId}@smsplatform.com`,
+        paymentReference,
+        paymentDescription: `SMS Platform Deposit - ₦${amount}`,
+        currencyCode: this.currency,
+        contractCode: this.contractCode,
+        redirectUrl: `${process.env.FRONTEND_URL}/transactions/success?ref=${paymentReference}`,
+        paymentMethods: ['CARD', 'ACCOUNT_TRANSFER', 'USSD', 'PHONE_NUMBER']
+      };
+
+      logger.info('Initializing Monnify transaction:', {
+        userId,
+        amount,
+        paymentReference
+      });
+
+      const response = await this.makeRequest(
+        'POST',
+        '/api/v1/merchant/transactions/init-transaction',
+        payload
       );
 
-      if (transactions.length === 0) {
-        throw new Error('Transaction not found in database');
-      }
+      const transactionData = response?.responseBody || {};
 
-      const transaction = transactions[0];
-      
-      if (transaction.status === 'PAID') {
-        logger.info('Transaction already processed:', { transactionReference });
-        await pool.execute('COMMIT');
-        return { success: true, message: 'Already processed' };
-      }
-
-      // Verify with Monnify
-      const verification = await this.verifyPayment(transaction.payment_reference);
-      
-      if (!verification.success || verification.status !== 'PAID') {
-        throw new Error('Payment verification failed');
-      }
-
-      // Update user balance
-      const amount = parseFloat(verification.amount);
+      // Save to database
       await pool.execute(
-        `INSERT INTO sms_user_accounts (user_id, balance) 
-         VALUES (?, ?) 
-         ON DUPLICATE KEY UPDATE balance = balance + ?`,
-        [transaction.user_id, amount, amount]
-      );
-
-      // Create transaction record
-      await pool.execute(
-        `INSERT INTO transactions 
-         (user_id, transaction_type, amount, reference_id, description, status, created_at)
-         VALUES (?, 'deposit', ?, ?, ?, 'completed', NOW())`,
+        `INSERT INTO payment_transactions 
+         (user_id, payment_reference, transaction_reference, amount, currency, 
+          status, customer_name, customer_email, payment_description, 
+          checkout_url, account_details, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
         [
-          transaction.user_id,
+          userId,
+          paymentReference,
+          transactionData.transactionReference,
           amount,
-          transactionReference,
-          `Balance deposit via Monnify - ${verification.paymentMethod}`
+          this.currency,
+          payload.customerName,
+          payload.customerEmail,
+          payload.paymentDescription,
+          transactionData.checkoutUrl,
+          JSON.stringify(transactionData.accountDetails || null)
         ]
       );
 
-      // Update Monnify transaction status
-      await pool.execute(
-        `UPDATE monnify_transactions 
-         SET status = 'PAID', amount_paid = ?, fee = ?, payment_method = ?, paid_at = NOW()
-         WHERE transaction_reference = ?`,
-        [amount, verification.fee || 0, verification.paymentMethod, transactionReference]
-      );
-
-      await pool.execute('COMMIT');
-
-      // Send notification via WebSocket if available
-      const webSocketService = require('./webhookService');
-      webSocketService.notifyBalanceUpdated(transaction.user_id, amount);
-
-      logger.info('Payment processed successfully:', {
-        userId: transaction.user_id,
-        amount,
-        transactionReference
-      });
-
       return {
         success: true,
-        userId: transaction.user_id,
-        amount,
-        newBalance: await this.getUserBalance(transaction.user_id),
-        transactionReference
-      };
-
-    } catch (error) {
-      await pool.execute('ROLLBACK');
-      logger.error('Process payment error:', error);
-      throw error;
-    }
-  }
-
-  // Initiate disbursement for SMS-Activate payments
-  async initiateDisbursement({
-    amount,
-    destinationBankCode,
-    destinationAccountNumber,
-    destinationAccountName,
-    narration,
-    userId,
-    reference = null
-  }) {
-    try {
-      const disbursementReference = reference || this.generatePaymentReference('DISB', userId);
-      
-      const disbursementData = {
+        paymentReference,
+        transactionReference: transactionData.transactionReference,
+        checkoutUrl: transactionData.checkoutUrl,
         amount: parseFloat(amount),
-        reference: disbursementReference,
-        narration: narration || 'SMS Service Payment',
-        destinationBankCode,
-        destinationAccountNumber,
-        destinationAccountName,
-        currency: 'NGN',
-        sourceAccountNumber: this.walletId || 'your-monnify-wallet-id'
+        currency: this.currency,
+        status: 'PENDING',
+        accountDetails: transactionData.accountDetails,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000)
       };
-
-      logger.info('Initiating disbursement:', {
-        userId,
-        amount,
-        reference: disbursementReference,
-        destination: destinationAccountNumber
-      });
-
-      const response = await this.makeRequest('POST', 'disbursements/single', disbursementData);
-
-      if (response.requestSuccessful) {
-        const { reference: transactionReference, status } = response.responseBody;
-        
-        // Log disbursement in database
-        const pool = getPool();
-        await pool.execute(
-          `INSERT INTO disbursements 
-           (user_id, reference, amount, destination_account, status, narration, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [userId, transactionReference, amount, destinationAccountNumber, status, narration]
-        );
-
-        return {
-          success: true,
-          reference: transactionReference,
-          status,
-          amount
-        };
-      }
-
-      throw new Error('Disbursement failed');
     } catch (error) {
-      logger.error('Disbursement error:', error);
-      throw error;
+      logger.error('Transaction initialization error:', error.message);
+      throw new Error(`Failed to initialize payment: ${error.message}`);
     }
   }
 
-  // Get account balance
-  async getAccountBalance() {
+  // FIXED: Correct verification endpoint
+  async verifyTransaction(transactionReference) {
     try {
-      const response = await this.makeRequest('GET', 'disbursements/wallet-balance');
+      logger.info('Verifying transaction with Monnify:', { transactionReference });
       
-      if (response.requestSuccessful) {
-        return {
-          success: true,
-          availableBalance: response.responseBody.availableBalance,
-          ledgerBalance: response.responseBody.ledgerBalance
-        };
-      }
+      // Use the correct endpoint format
+      const encodedRef = encodeURIComponent(transactionReference);
+      const response = await this.makeRequest(
+        'GET',
+        `/api/v1/merchant/transactions/query?paymentReference=${encodedRef}`
+      );
       
-      return { success: false, error: 'Failed to get balance' };
+      return response.responseBody;
     } catch (error) {
-      logger.error('Get balance error:', error);
+      logger.error('Transaction verification error:', error.message);
+      
+      // Try alternative endpoint if first fails
+      try {
+        logger.info('Trying alternative verification endpoint');
+        const encodedRef = encodeURIComponent(transactionReference);
+        const response = await this.makeRequest(
+          'GET',
+          `/api/v2/transactions/${encodedRef}`
+        );
+        return response.responseBody;
+      } catch (secondError) {
+        logger.error('Both verification endpoints failed:', {
+          primary: error.message,
+          alternative: secondError.message
+        });
+        throw error; // Throw original error
+      }
+    }
+  }
+
+  // Alternative: Verify by payment reference instead of transaction reference
+  async verifyPaymentByReference(paymentReference) {
+    try {
+      logger.info('Verifying payment by reference:', { paymentReference });
+      
+      const encodedRef = encodeURIComponent(paymentReference);
+      const response = await this.makeRequest(
+        'GET',
+        `/api/v1/merchant/transactions/query?paymentReference=${encodedRef}`
+      );
+      
+      return response.responseBody;
+    } catch (error) {
+      logger.error('Payment verification by reference failed:', error.message);
       throw error;
     }
   }
 
-  // Get user balance from database
+  // Verify webhook signature
+  verifyWebhookSignature(rawBody, signature) {
+    try {
+      if (!signature || !this.secretKey) {
+        return false;
+      }
+
+      const computed = crypto.createHmac('sha512', this.secretKey)
+        .update(rawBody)
+        .digest('hex');
+
+      return crypto.timingSafeEqual(
+        Buffer.from(signature, 'utf8'),
+        Buffer.from(computed, 'utf8')
+      );
+    } catch (error) {
+      logger.error('Signature verification error:', error.message);
+      return false;
+    }
+  }
+
+  // Generate payment reference
+  generatePaymentReference(userId, prefix = 'SMS') {
+    const timestamp = Date.now();
+    const random = crypto.randomBytes(4).toString('hex');
+    return `${prefix}_${userId}_${timestamp}_${random}`.toUpperCase();
+  }
+
+  // Get user balance
   async getUserBalance(userId) {
     try {
       const pool = getPool();
@@ -415,196 +272,30 @@ class MonnifyService {
         'SELECT balance FROM sms_user_accounts WHERE user_id = ?',
         [userId]
       );
-      
-      return result.length > 0 ? parseFloat(result[0].balance || 0) : 0;
+      return parseFloat(result[0]?.balance || 0);
     } catch (error) {
-      logger.error('Get user balance error:', error);
+      logger.error('Get user balance error:', error.message);
       return 0;
     }
   }
 
-  // Webhook verification
-  verifyWebhookSignature(payload, signature) {
+  // Health check
+  async healthCheck() {
     try {
-      if (!this.webhookSecret) {
-        logger.warn('Webhook secret not configured');
-        return false;
-      }
-
-      const expectedSignature = crypto
-        .createHmac('sha512', this.webhookSecret)
-        .update(payload, 'utf8')
-        .digest('hex');
-
-      return crypto.timingSafeEqual(
-        Buffer.from(signature, 'hex'),
-        Buffer.from(expectedSignature, 'hex')
-      );
+      const token = await this.authenticate();
+      return {
+        status: 'healthy',
+        authenticated: !!token,
+        environment: process.env.NODE_ENV,
+        baseUrl: this.baseUrl,
+        contractCode: this.contractCode
+      };
     } catch (error) {
-      logger.error('Webhook signature verification error:', error);
-      return false;
-    }
-  }
-
-  // Process webhook notification
-  async processWebhook(eventType, eventData) {
-    try {
-      logger.info('Processing Monnify webhook:', { eventType });
-
-      switch (eventType) {
-        case 'SUCCESSFUL_TRANSACTION':
-          return await this.handleSuccessfulTransaction(eventData);
-        case 'FAILED_TRANSACTION':
-          return await this.handleFailedTransaction(eventData);
-        case 'SUCCESSFUL_DISBURSEMENT':
-          return await this.handleSuccessfulDisbursement(eventData);
-        case 'FAILED_DISBURSEMENT':
-          return await this.handleFailedDisbursement(eventData);
-        default:
-          logger.warn('Unknown webhook event type:', eventType);
-          return { success: false, error: 'Unknown event type' };
-      }
-    } catch (error) {
-      logger.error('Webhook processing error:', error);
-      throw error;
-    }
-  }
-
-  // Handle successful transaction webhook
-  async handleSuccessfulTransaction(eventData) {
-    const { transactionReference, amountPaid, customer, paymentMethod } = eventData;
-    
-    try {
-      const result = await this.processSuccessfulPayment(transactionReference);
-      
-      logger.info('Webhook transaction processed:', {
-        transactionReference,
-        amountPaid,
-        customerEmail: customer?.email
-      });
-
-      return result;
-    } catch (error) {
-      logger.error('Handle successful transaction error:', error);
-      throw error;
-    }
-  }
-
-  // Handle failed transaction webhook
-  async handleFailedTransaction(eventData) {
-    const { transactionReference, paymentReference } = eventData;
-    
-    try {
-      const pool = getPool();
-      await pool.execute(
-        'UPDATE monnify_transactions SET status = ? WHERE transaction_reference = ? OR payment_reference = ?',
-        ['FAILED', transactionReference, paymentReference]
-      );
-
-      logger.info('Transaction marked as failed:', { transactionReference });
-      return { success: true };
-    } catch (error) {
-      logger.error('Handle failed transaction error:', error);
-      throw error;
-    }
-  }
-
-  // Handle successful disbursement webhook
-  async handleSuccessfulDisbursement(eventData) {
-    const { reference, amount } = eventData;
-    
-    try {
-      const pool = getPool();
-      await pool.execute(
-        'UPDATE disbursements SET status = ? WHERE reference = ?',
-        ['SUCCESS', reference]
-      );
-
-      logger.info('Disbursement completed:', { reference, amount });
-      return { success: true };
-    } catch (error) {
-      logger.error('Handle successful disbursement error:', error);
-      throw error;
-    }
-  }
-
-  // Handle failed disbursement webhook
-  async handleFailedDisbursement(eventData) {
-    const { reference, amount, failureReason } = eventData;
-    
-    try {
-      const pool = getPool();
-      await pool.execute(
-        'UPDATE disbursements SET status = ?, failure_reason = ? WHERE reference = ?',
-        ['FAILED', failureReason, reference]
-      );
-
-      logger.error('Disbursement failed:', { reference, amount, failureReason });
-      return { success: true };
-    } catch (error) {
-      logger.error('Handle failed disbursement error:', error);
-      throw error;
-    }
-  }
-
-  // Utility methods
-  generatePaymentReference(type, userId) {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return `${type}_${userId}_${timestamp}_${random}`;
-  }
-
-  shouldRetry(error) {
-    const retryableStatusCodes = [408, 429, 500, 502, 503, 504];
-    const retryableErrors = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'];
-    
-    return (
-      retryableStatusCodes.includes(error.response?.status) ||
-      retryableErrors.includes(error.code) ||
-      (error.response?.status === 401 && error.config?.url?.includes('auth/login'))
-    );
-  }
-
-  enhanceError(error) {
-    if (error.response?.data) {
-      const { responseMessage, responseCode } = error.response.data;
-      return new Error(`Monnify API Error: ${responseMessage || 'Unknown error'} (${responseCode || error.response.status})`);
-    }
-    
-    if (error.code === 'ENOTFOUND') {
-      return new Error('Network error: Unable to connect to Monnify API');
-    }
-    
-    return error;
-  }
-
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  // Get transaction history
-  async getTransactionHistory({ page = 1, size = 50, from = null, to = null }) {
-    try {
-      let endpoint = `merchant/transactions/search?page=${page}&size=${size}`;
-      
-      if (from) endpoint += `&from=${from}`;
-      if (to) endpoint += `&to=${to}`;
-
-      const response = await this.makeRequest('GET', endpoint);
-      
-      if (response.requestSuccessful) {
-        return {
-          success: true,
-          data: response.responseBody.content || [],
-          totalPages: response.responseBody.totalPages || 0,
-          totalElements: response.responseBody.totalElements || 0
-        };
-      }
-      
-      return { success: false, error: 'Failed to get transaction history' };
-    } catch (error) {
-      logger.error('Get transaction history error:', error);
-      throw error;
+      return {
+        status: 'unhealthy',
+        error: error.message,
+        environment: process.env.NODE_ENV
+      };
     }
   }
 }

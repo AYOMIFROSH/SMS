@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest"
+    "test": "jest",
+    "migrate:payments": "node migrations/createPaymentTables.js",
+    "test:monnify": "node -e \"require('./services/monnifyService').healthCheck().then(console.log).catch(console.error)\"",
+    "test:sms": "node -e \"require('./services/smsActivateServices').getBalance().then(console.log).catch(console.error)\""
   },
   "dependencies": {
     "axios": "^1.5.0",
@@ -27,6 +30,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.6.0",
+    "ngrok": "^5.0.0-beta.2",
     "redis": "^5.8.2",
     "serve-favicon": "^2.5.1",
     "winston": "^3.10.0",

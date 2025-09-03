@@ -1,4 +1,4 @@
-// index.js - Enhanced with all security fixes
+// index.js - Fixed webhook endpoint with comprehensive debugging and IP validation
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -18,31 +18,23 @@ const { setupRedis, getRedisClient } = require('./Config/redis');
 const sessionService = require('./services/sessionService');
 const logger = require('./utils/logger');
 const webSocketService = require('./services/webhookService');
+const monnifyService = require('./routes/monnifyService');
+const paymentWebhookProcessor = require('./services/paymentWebhookProcessor');
 const mobileOptimizationMiddleware = require('./middleware/mobile');
 
 const app = express();
 const server = http.createServer(app);
 
 const assetsPath = path.join(__dirname, 'assets');
-
-// serve static files from /assets for debugging or other assets
 app.use('/assets', express.static(assetsPath));
 
-// favicon path
 const icoPath = path.join(assetsPath, 'sms-buzzup.ico');
-
-// check file exists
-console.log('favicon ->', icoPath, 'exists?', fs.existsSync(icoPath));
-
-// middleware for favicon in browser tab
 app.use(favicon(icoPath, { maxAge: 7 * 24 * 60 * 60 * 1000 }));
-// Trust proxy for accurate client IPs
-app.set('trust proxy', process.env.TRUST_PROXY || 1);
 
-// Cookie parser MUST be before session
+app.set('trust proxy', process.env.TRUST_PROXY || 1);
 app.use(cookieParser());
 
-// Enhanced Helmet Security Headers
+// Enhanced Helmet Security Headers (relaxed for webhooks)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -65,15 +57,200 @@ app.use(helmet({
   }
 }));
 
-// Session Configuration with Redis Store
+// CORS Configuration
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://mysmsnumber.vercel.app';
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || 'https://sms.fizzbuzzup.com',
+      ...(process.env.NODE_ENV !== 'production' ? [
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://localhost:5174'
+      ] : [])
+    ];
+
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.warn('CORS blocked origin:', origin);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization',
+    'Cache-Control', 'X-CSRF-Token', 'CSRF-Token', 'x-csrf-token', 'csrf-token',
+    'X-Mobile-Client', 'X-Mobile-Platform', 'Cache-Control', 'Pragma',
+    'x-monnify-signature', 'monnify-signature', 'X-Monnify-Signature',
+    'X-Access-Token', 'X-Session-Token', 'X-Refresh-Token', 'x-skip-auth-interceptor'
+  ],
+  exposedHeaders: ['X-CSRF-Token', 'X-Total-Count', 'X-Page-Count'],
+  maxAge: 86400,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+app.use(compression({ level: 6, threshold: 1024 }));
+
+// Extract from index.js - Updated webhook endpoint
+
+// Monnify IP whitelist
+const MONNIFY_IPS = [
+  '35.242.133.146', // Primary Monnify IP
+  '::ffff:35.242.133.146', // IPv6 mapped IPv4
+  '127.0.0.1', // Local testing
+  '::1' // IPv6 localhost
+];
+
+// Helper to validate Monnify IP
+const isValidMonnifyIP = (ip) => {
+  const realIP = ip?.replace('::ffff:', '');
+  
+  // Allow localhost in development
+  if (process.env.NODE_ENV === 'development') {
+    if (ip === '127.0.0.1' || ip === '::1' || realIP === '127.0.0.1') {
+      return true;
+    }
+  }
+  
+  return MONNIFY_IPS.includes(ip) || MONNIFY_IPS.includes(realIP);
+};
+
+// CRITICAL: Monnify Webhook endpoint with raw body handling
+app.post('/webhook/monnify', 
+  // Raw body parser for signature verification
+  express.raw({ 
+    type: 'application/json',
+    limit: '10mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    }
+  }),
+  async (req, res) => {
+    const requestId = require('crypto').randomUUID();
+    
+    try {
+      // Log incoming webhook
+      const clientIP = req.ip || req.connection.remoteAddress;
+      
+      logger.info('Monnify webhook received', {
+        requestId,
+        clientIP,
+        hasSignature: !!(req.headers['x-monnify-signature'] || 
+                        req.headers['monnify-signature'] || 
+                        req.headers['X-Monnify-Signature']),
+        contentType: req.headers['content-type'],
+        bodyLength: req.body?.length || 0
+      });
+
+      // IP Validation (optional but recommended)
+      const isValidIP = isValidMonnifyIP(clientIP);
+      
+      if (!isValidIP && process.env.NODE_ENV === 'production') {
+        logger.warn('Webhook rejected: Invalid IP', {
+          requestId,
+          clientIP
+        });
+        
+        return res.status(403).json({ 
+          success: false, 
+          error: 'Forbidden',
+          requestId 
+        });
+      }
+
+      // Add request ID to headers for tracking
+      req.headers['x-request-id'] = requestId;
+      
+      // Delegate to webhook processor
+      await paymentWebhookProcessor.handleWebhook(req, res);
+      
+    } catch (error) {
+      logger.error('Webhook route error', {
+        requestId,
+        error: error.message
+      });
+      
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          success: false, 
+          error: 'Internal server error',
+          requestId
+        });
+      }
+    }
+  }
+);
+
+// Development test endpoint
+if (process.env.NODE_ENV === 'development') {
+  app.post('/webhook/test-monnify', express.json(), async (req, res) => {
+    logger.info('Test webhook triggered', { body: req.body });
+
+    try {
+      const testPayload = {
+        eventType: 'SUCCESSFUL_TRANSACTION',
+        eventData: {
+          transactionReference: 'TEST_' + Date.now(),
+          paymentReference: req.body.paymentReference || 'TEST_PAY_' + Date.now(),
+          amountPaid: req.body.amount || 1000,
+          paidOn: new Date().toISOString(),
+          paymentMethod: 'ACCOUNT_TRANSFER',
+          currency: 'NGN',
+          paymentStatus: 'PAID',
+          customer: {
+            email: req.body.email || 'test@example.com',
+            name: 'Test User'
+          }
+        }
+      };
+
+      req.body = testPayload;
+      req.rawBody = JSON.stringify(testPayload);
+      req.headers['x-monnify-signature'] = 'test-signature';
+      
+      await paymentWebhookProcessor.handleWebhook(req, res);
+      
+    } catch (error) {
+      logger.error('Test webhook error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+}
+
+
+
+// Body parsing middleware for other endpoints
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    // Skip webhook endpoints
+    if (req.path.includes('/webhook/')) return;
+    req.rawBody = buf.toString('utf8');
+  }
+}));
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
+}));
+
+// Session Configuration
 const sessionMiddleware = async () => {
   const redisClient = getRedisClient();
 
   const sessionConfig = {
     name: process.env.SESSION_COOKIE_NAME || 'sessionId',
     secret: process.env.SESSION_SECRET || 'your-super-secret-session-key-minimum-32-chars',
-    resave: false,               // required to remove warning
-    saveUninitialized: false,    // required to remove warning
+    resave: false,
+    saveUninitialized: false,
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -88,7 +265,7 @@ const sessionMiddleware = async () => {
     sessionConfig.store = new RedisStore({
       client: redisClient,
       prefix: 'sess:',
-      ttl: 86400 // 24 hours
+      ttl: 86400
     });
     logger.info('Using Redis for session storage');
   } else {
@@ -98,96 +275,13 @@ const sessionMiddleware = async () => {
   return session(sessionConfig);
 };
 
-// Enhanced CORS Configuration
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://mysmsnumber.vercel.app';
-
-// Enhanced CORS Configuration for iOS compatibility
-const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'https://sms.fizzbuzzup.com',
-      ...(process.env.NODE_ENV !== 'production' ? [
-        'http://localhost:3000',
-        'http://localhost:5173',
-        'http://localhost:5174'
-      ] : [])
-    ];
-
-    // Allow no origin (mobile apps, Postman)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    console.warn('CORS blocked origin:', origin);
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With',
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'Cache-Control',
-    'X-CSRF-Token',
-    'CSRF-Token',
-    'x-csrf-token',
-    'csrf-token',
-    'X-Mobile-Client',
-    'X-Mobile-Platform',
-    'Cache-Control',
-    'Pragma',
-    // iOS fallback headers
-    'X-Access-Token',
-    'X-Session-Token',
-    'X-Refresh-Token',
-    'x-skip-auth-interceptor' // 👈 Add this
-
-  ],
-  exposedHeaders: [
-    'X-CSRF-Token',
-    'X-Total-Count',
-    'X-Page-Count'
-  ],
-  maxAge: 86400, // 24 hours
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
-
-// Compression
-app.use(compression({
-  level: 6,
-  threshold: 1024
-}));
-
-// Body parsing middleware with raw body for webhooks
-app.use(express.json({
-  limit: '10mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf.toString('utf8');
-  }
-}));
-
-app.use(express.urlencoded({
-  extended: true,
-  limit: '10mb'
-}));
-
-
-
-
 // Request logging middleware
 app.use((req, res, next) => {
   req.requestId = require('crypto').randomUUID();
   const startTime = Date.now();
 
-  if (!req.path.includes('/api/health')) {
+  // Skip logging for health checks and webhooks (already logged)
+  if (!req.path.includes('/api/health') && !req.path.includes('/webhook/')) {
     logger.info('Incoming request:', {
       requestId: req.requestId,
       method: req.method,
@@ -199,7 +293,7 @@ app.use((req, res, next) => {
 
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-    if (!req.path.includes('/api/health')) {
+    if (!req.path.includes('/api/health') && !req.path.includes('/webhook/')) {
       const level = res.statusCode >= 400 ? 'warn' : 'info';
       logger[level]('Request completed:', {
         requestId: req.requestId,
@@ -214,22 +308,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF Protection Setup (after session but before routes)
-// CSRF Protection with Enhanced Configuration
+// CSRF Protection Setup
 const csrfProtection = csrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 3600000, // 1 hour
+    maxAge: 3600000,
     path: '/',
-    // Add domain for production if using custom domain
     domain: process.env.NODE_ENV === 'production' ? ".fizzbuzzup.com" : undefined
-
   },
   ignoreMethods: ['GET', 'HEAD', 'OPTIONS'],
   value: (req) => {
-    // Multiple CSRF token sources
     return req.body._csrf ||
       req.query._csrf ||
       req.headers['x-csrf-token'] ||
@@ -237,20 +327,7 @@ const csrfProtection = csrf({
   }
 });
 
-// Provide CSRF token endpoint
-app.get('/api/csrf-token', csrfProtection, (req, res) => {
-  res.json({ 
-    success: true,
-    csrfToken: req.csrfToken(),
-    // Additional security info for debugging
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-  });
-});
-
-
-
-// Health check endpoint (no auth/CSRF required)
+// Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
     const sessionStats = await sessionService.getSessionStats();
@@ -265,13 +342,14 @@ app.get('/api/health', async (req, res) => {
         used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
         total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB'
       },
-      database: {
-        connected: true
-      },
-      redis: {
-        connected: getRedisClient()?.isOpen || false
-      },
+      database: { connected: true },
+      redis: { connected: getRedisClient()?.isOpen || false },
       sessions: sessionStats,
+      webhook: {
+        endpoint: '/webhook/monnify',
+        allowedIPs: MONNIFY_IPS,
+        environment: process.env.NODE_ENV
+      },
       requestId: req.requestId
     });
   } catch (error) {
@@ -284,6 +362,38 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// Enhanced webhook debugging endpoint
+app.get('/api/webhook/debug', (req, res) => {
+  res.json({
+    webhookEndpoint: '/webhook/monnify',
+    testEndpoint: process.env.NODE_ENV === 'development' ? '/webhook/test-monnify' : null,
+    allowedIPs: MONNIFY_IPS,
+    environment: process.env.NODE_ENV,
+    serverTime: new Date().toISOString(),
+    expectedHeaders: [
+      'x-monnify-signature',
+      'monnify-signature',
+      'X-Monnify-Signature'
+    ],
+    paymentService: {
+      apiUrl: process.env.NODE_ENV === 'production' ? 'https://api.monnify.com' : 'https://sandbox.monnify.com',
+      hasApiKey: !!process.env.MONNIFY_API_KEY,
+      hasSecretKey: !!process.env.MONNIFY_SECRET_KEY,
+      hasContractCode: !!process.env.MONNIFY_CONTRACT_CODE
+    }
+  });
+});
+
+// CSRF token endpoint
+app.get('/api/csrf-token', csrfProtection, (req, res) => {
+  res.json({
+    success: true,
+    csrfToken: req.csrfToken(),
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  });
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -292,120 +402,27 @@ app.get('/', (req, res) => {
     status: 'running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
+    webhook: {
+      monnify: '/webhook/monnify',
+      test: process.env.NODE_ENV === 'development' ? '/webhook/test-monnify' : undefined
+    },
     endpoints: {
       health: '/api/health',
+      webhookDebug: '/api/webhook/debug',
       documentation: '/api/docs',
       csrfToken: '/api/csrf-token'
     }
   });
 });
 
-// API Routes with CSRF protection where needed
+// API Routes
 app.use('/api/auth', mobileOptimizationMiddleware, require('./routes/auth'));
 app.use('/api/dashboard', csrfProtection, require('./routes/dashboard'));
 app.use('/api/numbers', csrfProtection, require('./routes/numbers'));
-app.use('/api/services', require('./routes/services')); // Read-only, no CSRF needed
+app.use('/api/services', require('./routes/services'));
 app.use('/api/transactions', csrfProtection, require('./routes/transactions'));
 app.use('/api/settings', csrfProtection, require('./routes/settings'));
-
-// SMS-Activate Webhook endpoint (special handling, no CSRF)
-app.post('/webhook/sms-activate', express.raw({ type: 'application/json' }), async (req, res) => {
-  try {
-    // Verify webhook signature if provided
-    const signature = req.headers['x-sms-activate-signature'];
-    const webhookSecret = process.env.SMS_ACTIVATE_WEBHOOK_SECRET;
-
-    if (webhookSecret && signature) {
-      const crypto = require('crypto');
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(req.rawBody)
-        .digest('hex');
-
-      if (signature !== expectedSignature) {
-        logger.warn('Invalid webhook signature');
-        return res.status(401).json({ error: 'Invalid signature' });
-      }
-    }
-
-    // Verify IP whitelist if configured
-    const allowedIPs = process.env.SMS_ACTIVATE_IPS?.split(',').map(ip => ip.trim()) || [];
-    const clientIP = req.ip || req.connection.remoteAddress;
-
-    if (allowedIPs.length > 0 && !allowedIPs.includes(clientIP)) {
-      logger.warn(`Webhook from unauthorized IP: ${clientIP}`);
-      return res.status(403).json({ error: 'Unauthorized IP' });
-    }
-
-    // Parse webhook data
-    const webhookData = JSON.parse(req.rawBody);
-
-    // Validate required fields
-    if (!webhookData.activationId || !webhookData.status) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // Process webhook asynchronously
-    setImmediate(async () => {
-      try {
-        const webSocketService = require('./services/webhookService');
-        await webSocketService.processWebhook(webhookData);
-      } catch (error) {
-        logger.error('Webhook processing error:', error);
-      }
-    });
-
-    // Respond immediately
-    res.status(200).json({ success: true });
-
-  } catch (error) {
-    logger.error('Webhook error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Session management endpoints
-app.get('/api/sessions/stats', async (req, res) => {
-  try {
-    const stats = await sessionService.getSessionStats();
-    res.json({ success: true, data: stats });
-  } catch (error) {
-    logger.error('Session stats error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get session stats' });
-  }
-});
-
-// API documentation
-app.get('/api/docs', (req, res) => {
-  res.json({
-    name: 'SMS Verification Dashboard API',
-    version: '1.0.0',
-    description: 'Secure SMS verification service with enhanced authentication',
-    security: {
-      authentication: 'JWT with refresh tokens',
-      csrf: 'Token-based CSRF protection on state-changing endpoints',
-      cookies: 'HTTP-only secure cookies for session management',
-      rateLimiting: 'Applied to all endpoints',
-      headers: 'Security headers via Helmet.js'
-    },
-    endpoints: {
-      authentication: {
-        'GET /api/csrf-token': 'Get CSRF token for requests',
-        'POST /api/auth/login': 'User login',
-        'POST /api/auth/refresh': 'Refresh access token',
-        'POST /api/auth/logout': 'Logout current session',
-        'GET /api/auth/me': 'Get current user info'
-      },
-      services: {
-        'GET /api/services': 'Get available SMS services',
-        'GET /api/services/countries': 'Get supported countries',
-        'GET /api/services/prices': 'Get pricing information'
-      }
-    }
-  });
-});
-
-
+app.use('/api/payments', csrfProtection, require('./routes/payment'));
 
 // 404 handler
 app.use('/api/*', (req, res) => {
@@ -426,7 +443,6 @@ app.use((err, req, res, next) => {
     path: req.path
   });
 
-  // CSRF token errors
   if (err.code === 'EBADCSRFTOKEN') {
     return res.status(403).json({
       success: false,
@@ -435,7 +451,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // CORS errors
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
@@ -444,7 +459,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // JWT errors
   if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
     return res.status(401).json({
       success: false,
@@ -453,7 +467,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Default error
   res.status(err.status || 500).json({
     success: false,
     error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
@@ -461,17 +474,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Server startup
+// Server startup function
 async function startServer() {
   try {
     logger.info('🚀 Starting Enhanced SMS Verification Server...');
-    logger.info(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
 
     // Validate environment variables
     const requiredEnvVars = [
       'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME',
       'EXISTING_DB_HOST', 'EXISTING_DB_USER', 'EXISTING_DB_PASSWORD', 'EXISTING_DB_NAME',
-      'JWT_SECRET', 'SESSION_SECRET', 'SMS_ACTIVATE_API_KEY'
+      'JWT_SECRET', 'SESSION_SECRET', 'SMS_ACTIVATE_API_KEY',
+      'MONNIFY_API_KEY', 'MONNIFY_SECRET_KEY', 'MONNIFY_CONTRACT_CODE'
     ];
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -492,6 +506,14 @@ async function startServer() {
       logger.warn('⚠️ Redis connection failed, using memory store:', redisError.message);
     }
 
+    // Test Monnify service
+    try {
+      const monnifyHealth = await monnifyService.healthCheck();
+      logger.info('✅ Monnify service health check:', monnifyHealth);
+    } catch (monnifyError) {
+      logger.warn('⚠️ Monnify service connection warning:', monnifyError.message);
+    }
+
     // Apply session middleware
     const sessionMid = await sessionMiddleware();
     app.use(sessionMid);
@@ -505,16 +527,22 @@ async function startServer() {
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, '::', () => {
       logger.info(`
-        🎉 Server running on port ${PORT}
-        🔗 Health: http://localhost:${PORT}/api/health
+        ✅ Enhanced SMS Platform Server Running
+        🌐 Port: ${PORT}
+        🏥 Health: http://localhost:${PORT}/api/health
+        🔧 Webhook Debug: http://localhost:${PORT}/api/webhook/debug
+        🎯 Monnify Webhook: http://localhost:${PORT}/webhook/monnify
+        ${process.env.NODE_ENV === 'development' ? '🧪 Test Webhook: http://localhost:${PORT}/webhook/test-monnify' : ''}
         📚 Docs: http://localhost:${PORT}/api/docs
-        🌐 Frontend: ${FRONTEND_URL}
-        🔐 Security: CSRF + JWT + Secure Cookies
+        🖥️ Frontend: ${FRONTEND_URL}
+        🔐 Security: Enhanced IP validation + CSRF + JWT
         💾 Sessions: ${getRedisClient()?.isOpen ? 'Redis' : 'Memory'}
+        💳 Payments: Monnify Enhanced Integration
+        🚨 Allowed IPs: ${MONNIFY_IPS.join(', ')}
       `);
     });
 
-    // Session cleanup interval
+    // Cleanup intervals
     setInterval(async () => {
       try {
         const cleaned = await sessionService.cleanupExpiredSessions();
@@ -524,7 +552,7 @@ async function startServer() {
       } catch (error) {
         logger.warn('Session cleanup error:', error.message);
       }
-    }, 60 * 60 * 1000); // Every hour
+    }, 60 * 60 * 1000);
 
   } catch (error) {
     logger.error('❌ Server startup failed:', error);
@@ -533,36 +561,66 @@ async function startServer() {
 }
 
 // Graceful shutdown
-const gracefulShutdown = (signal) => {
-  logger.info(`${signal} received, shutting down gracefully...`);
-
-  server.close(async () => {
-    try {
-      // Close database connections
-      const { getPool, getExistingDbPool } = require('./Config/database');
-      const pool = getPool();
-      const existingPool = getExistingDbPool();
-
-      if (pool) await pool.end();
-      if (existingPool) await existingPool.end();
-
-      // Close Redis
-      const redis = getRedisClient();
-      if (redis) await redis.quit();
-
-      logger.info('✅ Graceful shutdown completed');
-      process.exit(0);
-    } catch (error) {
-      logger.error('Shutdown error:', error);
-      process.exit(1);
+async function gracefulShutdown(signal) {
+  logger.info(`\n${signal} received, starting graceful shutdown...`);
+  
+  const { getPool, getExistingDbPool } = require('./Config/database');
+  const { getRedisClient } = require('./Config/redis');
+  
+  try {
+    // 1. Stop accepting new connections
+    logger.info('⏹ Stopping server...');
+    
+    // 2. Close WebSocket connections
+    const webSocketService = require('./services/webhookService');
+    if (webSocketService.wss) {
+      webSocketService.wss.clients.forEach(ws => {
+        ws.close(1000, 'Server shutting down');
+      });
     }
-  });
-};
+    
+    // 3. Wait for existing requests to complete (max 30s)
+    await new Promise(resolve => {
+      const timeout = setTimeout(resolve, 30000);
+      server.close(() => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    
+    // 4. Close database connections
+    const pool = getPool();
+    const existingPool = getExistingDbPool();
+    
+    if (pool) {
+      await pool.end();
+      logger.info('✅ Main database connection closed');
+    }
+    
+    if (existingPool) {
+      await existingPool.end();
+      logger.info('✅ Existing database connection closed');
+    }
+    
+    // 5. Close Redis connection
+    const redis = getRedisClient();
+    if (redis && redis.isOpen) {
+      await redis.quit();
+      logger.info('✅ Redis connection closed');
+    }
+    
+    logger.info('✅ Graceful shutdown completed');
+    process.exit(0);
+    
+  } catch (error) {
+    logger.error('❌ Shutdown error:', error);
+    process.exit(1);
+  }
+}
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Start server
 startServer();
 
 module.exports = { app, server };
