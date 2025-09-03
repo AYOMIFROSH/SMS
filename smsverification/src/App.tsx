@@ -1,4 +1,4 @@
-// src/App.tsx - Production-ready app with security and proper error handling
+// src/App.tsx - Updated with payment success route
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -11,14 +11,15 @@ import { History } from '@/pages/History';
 import { Transactions } from '@/pages/Transactions';
 import { Settings } from '@/pages/Settings';
 import Login from '@/pages/Login';
+import PaymentSuccess from '@/components/payment/PaymentSuccess';
 import PrivateRoute from '@/components/common/PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import useWebSocket from './hooks/useWebsocket';
 import useAuth from '@/hooks/useAuth';
+import { usePayment } from '@/hooks/usePayment';
 import { healthCheck } from '@/api/client';
 import { Analytics } from '@vercel/analytics/react';
-
 
 // Security headers check component
 const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -26,20 +27,16 @@ const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [healthStatus, setHealthStatus] = useState<'checking' | 'healthy' | 'unhealthy'>('checking');
 
   useEffect(() => {
-    // Check for security headers and HTTPS in production
     const checkSecurity = async () => {
       try {
-        // Check HTTPS in production
         if (import.meta.env.PROD && window.location.protocol !== 'https:') {
           console.warn('Production app should be served over HTTPS');
         }
 
-        // Check if running in secure context
         if (!window.isSecureContext && import.meta.env.PROD) {
           console.warn('App not running in secure context');
         }
 
-        // Verify server health
         const isHealthy = await healthCheck();
         setHealthStatus(isHealthy ? 'healthy' : 'unhealthy');
 
@@ -97,23 +94,46 @@ const AppContent: React.FC = () => {
   const { isAuthenticated, isReady, needsLogin, isInitializing, hasError, errorMessage } = useAuth();
   const [showConnected, setShowConnected] = useState(false);
 
-
-
   // Initialize WebSocket connection only when fully authenticated and ready
   const ws = useWebSocket(undefined, true) || {};
   const { isConnected: wsConnected = false, connectionError: wsError = null } = ws;
   const hasConnectionIssue = !wsConnected && Boolean(wsError);
 
+  // Initialize payment hook for WebSocket integration
+  const { handleWebSocketUpdate } = usePayment();
 
   useEffect(() => {
     if (wsConnected) {
       setShowConnected(true);
       const timer = setTimeout(() => {
         setShowConnected(false);
-      }, 3500); // 3.5 seconds
+      }, 3500);
       return () => clearTimeout(timer);
     }
   }, [wsConnected]);
+
+  // Handle WebSocket messages related to payments
+  useEffect(() => {
+    const handleWebSocketMessage = (event: CustomEvent) => {
+      const { type, data } = event.detail;
+      
+      // Handle payment-related WebSocket messages
+      if ([
+        'payment_successful',
+        'payment_failed', 
+        'payment_cancelled',
+        'payment_reversed',
+        'balance_updated'
+      ].includes(type)) {
+        handleWebSocketUpdate({ type, data });
+      }
+    };
+
+    window.addEventListener('websocket:message', handleWebSocketMessage as EventListener);
+    return () => {
+      window.removeEventListener('websocket:message', handleWebSocketMessage as EventListener);
+    };
+  }, [handleWebSocketUpdate]);
 
   console.log('App render state:', {
     isAuthenticated,
@@ -124,7 +144,6 @@ const AppContent: React.FC = () => {
     wsError
   });
 
-  // Show loading during initialization
   if (isInitializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
@@ -136,7 +155,6 @@ const AppContent: React.FC = () => {
     );
   }
 
-  // Show authentication error if it exists
   if (hasError && needsLogin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-red-50">
@@ -170,6 +188,13 @@ const AppContent: React.FC = () => {
             <AuthLayout>
               <Login />
             </AuthLayout>
+          } />
+
+          {/* Payment Success Route - Semi-protected (requires URL params) */}
+          <Route path="/transactions/success" element={
+            <PrivateRoute>
+              <PaymentSuccess />
+            </PrivateRoute>
           } />
 
           {/* Protected Routes */}
@@ -211,7 +236,7 @@ const AppContent: React.FC = () => {
           } />
         </Routes>
 
-        {/* Enhanced Toast Notifications with Security Considerations */}
+        {/* Enhanced Toast Notifications */}
         <Toaster
           position="top-right"
           gutter={8}
@@ -284,8 +309,6 @@ const AppContent: React.FC = () => {
             ) : null}
           </div>
         )}
-
-
       </div>
     </Router>
   );

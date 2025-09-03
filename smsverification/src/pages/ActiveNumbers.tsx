@@ -5,8 +5,10 @@ import { RootState, AppDispatch } from '@/store/store';
 import { fetchActiveNumbers, cancelNumber, completeNumber } from '@/store/slices/numbersSlice';
 import NumberCard from '@/components/numbers/NumberCards';
 import { RefreshCw, Smartphone, AlertCircle } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const ActiveNumbers: React.FC = () => {
+    useDocumentTitle("SMS Active Numbers");
   const dispatch = useDispatch<AppDispatch>();
   const { activeNumbers, loading, error } = useSelector(
     (state: RootState) => state.numbers

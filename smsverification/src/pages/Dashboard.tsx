@@ -7,8 +7,10 @@ import StatsCards from '@/components/dashboard/StatsCards';
 import RecentActivity from '@/components/dashboard/RecentActivity';
 import QuickActions from '@/components/dashboard/QuickActions';
 import BalanceWidget from '@/components/dashboard/BalanceWidget';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const Dashboard: React.FC = () => {
+    useDocumentTitle("SMS Verification Dashboard");
   const dispatch = useDispatch<AppDispatch>();
   const { stats, activity, loading, error } = useSelector(
     (state: RootState) => state.dashboard

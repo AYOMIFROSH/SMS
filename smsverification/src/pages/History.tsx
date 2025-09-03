@@ -12,8 +12,10 @@ import {
   Clock,
   AlertCircle
 } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export const History: React.FC = () => {
+    useDocumentTitle("SMS Verification History");
   const dispatch = useDispatch<AppDispatch>();
   const { history, loading, pagination } = useSelector((state: RootState) => state.numbers);
   

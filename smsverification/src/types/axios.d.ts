@@ -14,7 +14,7 @@ declare module 'axios' {
 
   export interface AxiosError<T = any> {
     response?: {
-      data: ApiError;   // now uses the type properly
+      data: ApiError;   
       status: number;
       headers: any;
       config: AxiosRequestConfig;

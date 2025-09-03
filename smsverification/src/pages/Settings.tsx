@@ -1,7 +1,9 @@
 import React from 'react';
 import { Key, Bell } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 export const Settings: React.FC = () => {
+    useDocumentTitle("SMS Verification Settings");
   return (
     <div className="space-y-6">
       <div>

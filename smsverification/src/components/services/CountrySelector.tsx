@@ -1,4 +1,4 @@
-// src/components/services/CountrySelector.tsx - Mobile Responsive Version
+// src/components/services/CountrySelector.tsx - FIXED: SMS-Activate Country Code System
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, Loader2, Globe, Filter, X } from 'lucide-react';
 import { Country } from '@/types';
@@ -12,8 +12,17 @@ interface CountrySelectorProps {
   loading?: boolean;
 }
 
-// Popular countries that should appear first
-const popularCountries = ['0', '1', '2', '3', '6', '7', '44', '33', '49'];
+// FIXED: SMS-Activate internal country codes to proper country flags mapping
+const SMS_ACTIVATE_COUNTRY_FLAGS: { [key: string]: string } = {
+  '36': "ca",
+  '187': 'us',
+  '16': 'uk',
+  '19': 'ng'
+  
+};
+
+// Popular SMS-Activate country codes (based on typical usage)
+const popularCountryCodes = ['36', '187', '19', '16', '91', '86', '33', '49', '39', '34', '55', '81', '82'];
 
 const CountrySelector: React.FC<CountrySelectorProps> = ({
   countries,
@@ -49,55 +58,41 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
     }
   }, [searchQuery]);
 
-  const getCountryFlag = (countryCode: string) => {
-    const flagMap: { [key: string]: string } = {
-      '0': '🌍', // Global/International
-      '1': '🇺🇦', // Ukraine
-      '2': '🇺🇸', // USA
-      '3': '🇷🇺', // Russia
-      '6': '🇰🇿', // Kazakhstan
-      '7': '🇷🇺', // Russia
-      '44': '🇬🇧', // UK
-      '33': '🇫🇷', // France
-      '49': '🇩🇪', // Germany
-      '34': '🇪🇸', // Spain
-      '39': '🇮🇹', // Italy
-      '31': '🇳🇱', // Netherlands
-      '46': '🇸🇪', // Sweden
-      '47': '🇳🇴', // Norway
-      '48': '🇵🇱', // Poland
-      '91': '🇮🇳', // India
-      '86': '🇨🇳', // China
-      '81': '🇯🇵', // Japan
-      '82': '🇰🇷', // South Korea
-      '55': '🇧🇷', // Brazil
-      '52': '🇲🇽', // Mexico
-      '61': '🇦🇺', // Australia
-      '27': '🇿🇦', // South Africa
-    };
-    return flagMap[countryCode] || '🌍';
+  // FIXED: Get country flag using SMS-Activate internal code
+  const getCountryFlag = (smsActivateCode: string) => {
+    return SMS_ACTIVATE_COUNTRY_FLAGS[smsActivateCode] || '🌍';
+  };
+
+  // FIXED: Generate country name fallback if needed
+  const getDisplayName = (country: Country) => {
+    if (country.name && country.name.trim()) {
+      return country.name;
+    }
+    // Fallback to country code if name is missing
+    return `Country ${country.code}`;
   };
 
   const filterCountries = () => {
     let filtered = countries.filter(country =>
-      country.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      country.code?.toLowerCase().includes(searchQuery.toLowerCase())
+      getDisplayName(country).toLowerCase().includes(searchQuery.toLowerCase()) ||
+      country.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (country.rus && country.rus.toLowerCase().includes(searchQuery.toLowerCase()))
     );
 
     // Sort countries
     switch (sortBy) {
       case 'name':
-        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        filtered.sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
         break;
       case 'code':
-        filtered.sort((a, b) => a.code.localeCompare(b.code));
+        filtered.sort((a, b) => parseInt(a.code) - parseInt(b.code));
         break;
       case 'popular':
       default:
         // Keep popular countries first, then sort others by name
-        const popular = filtered.filter(c => popularCountries.includes(c.code));
-        const others = filtered.filter(c => !popularCountries.includes(c.code))
-          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        const popular = filtered.filter(c => popularCountryCodes.includes(c.code));
+        const others = filtered.filter(c => !popularCountryCodes.includes(c.code))
+          .sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
         filtered = [...popular, ...others];
         break;
     }
@@ -107,7 +102,7 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
 
   const filteredCountries = filterCountries();
   const popularCountriesData = countries.filter(country => 
-    popularCountries.includes(country.code)
+    popularCountryCodes.includes(country.code)
   );
 
   const displayCountries = showAllCountries || searchQuery 
@@ -177,7 +172,7 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
               {[
                 { value: 'popular', label: 'Popular First' },
                 { value: 'name', label: 'Name (A-Z)' },
-                { value: 'code', label: 'Country Code' }
+                { value: 'code', label: 'Code (Numeric)' }
               ].map(option => (
                 <button
                   key={option.value}
@@ -287,11 +282,12 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm lg:text-base font-medium text-gray-900 truncate group-hover:text-gray-800 transition-colors">
-                      {country.name}
+                      {getDisplayName(country)}
                     </p>
-                    <p className="text-xs lg:text-sm text-gray-500 group-hover:text-gray-600 transition-colors">
-                      +{country.code}
-                    </p>
+                    <div className="flex items-center space-x-2 text-xs lg:text-sm text-gray-500 group-hover:text-gray-600 transition-colors">
+                      <span>Code: {country.code}</span>
+                     
+                    </div>
                   </div>
                   {selectedCountry === country.code && (
                     <div className="flex-shrink-0">
@@ -343,7 +339,7 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
                 Country Selection
               </p>
               <p className="text-xs text-blue-700 leading-relaxed">
-                Select your country to see available SMS services and operators. Popular countries are shown first for convenience.
+                Select your country to see available SMS services and operators. Each country has a unique SMS-Activate code for API integration.
               </p>
             </div>
           </div>

@@ -20,8 +20,11 @@ import PriceDisplay from '@/components/services/PriceDisplay';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
 import { AlertCircle, CheckCircle, Info, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
+    useDocumentTitle("SMS Purchase Numbers");
+
   const dispatch = useDispatch<AppDispatch>();
   const { 
     services, 
