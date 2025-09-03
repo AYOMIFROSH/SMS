@@ -1,5 +1,5 @@
 // src/pages/Transactions.tsx - Fixed to trust backend webhooks
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   CreditCard, 
   TrendingUp, 
@@ -202,13 +202,11 @@ export const Transactions: React.FC = () => {
     pagination,
     summary,
     filters,
-    loadBalance,
     loadTransactions,
     formatAmount,
     cancelPayment,
     retryPayment,
     updateFilters,
-    resetFilters,
   } = usePayment({ autoFetch: true });
 
   const [showDepositModal, setShowDepositModal] = useState(false);
