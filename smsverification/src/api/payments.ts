@@ -1,4 +1,4 @@
-// src/api/payments.ts - Simplified to trust backend webhooks
+// src/api/payments.ts - FIXED to trust backend webhooks completely
 import client from './client';
 import { ApiResponse } from '@/types';
 
@@ -6,8 +6,11 @@ export interface PaymentBalance {
   balance: number;
   currency: string;
   total_spent: number;
+  total_deposited: number;
   total_numbers_purchased: number;
   account_status: 'active' | 'suspended' | 'pending';
+  deposit_count?: number;
+  last_deposit_at?: string;
 }
 
 export interface PaymentTransaction {
@@ -35,6 +38,13 @@ export interface PaymentTransaction {
   expires_at?: string;
   created_at: string;
   updated_at: string;
+  // FIXED: Settlement fields from server
+  settlement_status?: 'PENDING' | 'COMPLETED' | 'FAILED';
+  settlement_date?: string;
+  settlement_reference?: string;
+  settlement_amount?: number;
+  transaction_fee?: number;
+  response_code?: string;
 }
 
 export interface DepositRequest {
@@ -94,6 +104,13 @@ export interface PaymentVerification {
     createdAt: string;
     paidAt?: string;
     expiresAt?: string;
+    failureReason?: string;
+    // FIXED: Settlement fields from server
+    settlement_status?: 'PENDING' | 'COMPLETED' | 'FAILED';
+    settlement_date?: string;
+    settlement_reference?: string;
+    settlement_amount?: number;
+    transaction_fee?: number;
   };
 }
 
@@ -125,15 +142,16 @@ export const paymentApi = {
   },
 
   /**
-   * SIMPLIFIED: Simple verification - no forced completion
+   * FIXED: Simple verification - trust server completely, no forced completion
    */
   verifyPayment: async (reference: string): Promise<PaymentVerification> => {
-    console.log('Verifying payment:', reference);
+    console.log('Verifying payment with server:', reference);
 
     try {
       const response = await client.get(`/payments/verify/${reference}`);
 
       if (response.data?.success) {
+        console.log('Payment verification result:', response.data.data.status);
         return response.data;
       }
 
@@ -157,8 +175,6 @@ export const paymentApi = {
    * Get current user balance
    */
   getBalance: async (): Promise<ApiResponse<PaymentBalance>> => {
-    console.log('Fetching user balance...');
-
     try {
       const response = await client.get('/payments/balance');
 
@@ -174,21 +190,23 @@ export const paymentApi = {
   },
 
   /**
-   * Get payment history with filtering
+   * FIXED: Get payment history with settlement status from server
    */
   getPaymentHistory: async (params?: {
     page?: number;
     limit?: number;
     status?: string;
+    settlement_status?: string;
     startDate?: string;
     endDate?: string;
   }): Promise<PaymentHistory> => {
-    console.log('Fetching payment history:', params);
+    console.log('Fetching payment history from server:', params);
 
     try {
       const response = await client.get('/payments/history', { params });
 
       if (response.data?.success) {
+        console.log('Payment history fetched:', response.data.data.length, 'transactions');
         return response.data;
       }
 
@@ -229,34 +247,55 @@ export const paymentApi = {
   },
 
   /**
-   * Open Monnify checkout window - simple popup management
+   * FIXED: Open Monnify checkout with proper redirect URL
    */
   openMonnifyCheckout: (checkoutUrl: string): Window | null => {
     console.log('Opening Monnify checkout:', checkoutUrl);
 
     try {
+      // FIXED: Enhanced popup with better positioning
+      const left = (window.screen.width / 2) - (800 / 2);
+      const top = (window.screen.height / 2) - (700 / 2);
+      
       const popup = window.open(
         checkoutUrl,
         'monnify-checkout',
-        'width=800,height=700,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no'
+        `width=800,height=700,left=${left},top=${top},scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no`
       );
 
       if (!popup || popup.closed || typeof popup.closed === 'undefined') {
         console.warn('Popup blocked - redirecting to checkout URL');
-        window.location.href = checkoutUrl;
+        
+        // FIXED: Add redirect URL parameter to checkout URL
+        const currentUrl = window.location.origin;
+        const paymentRef = new URL(checkoutUrl).searchParams.get('paymentReference') || 
+                          new URL(checkoutUrl).searchParams.get('reference');
+        const redirectUrl = `${currentUrl}/payment-success?ref=${paymentRef}`;
+        
+        const separator = checkoutUrl.includes('?') ? '&' : '?';
+        const urlWithRedirect = `${checkoutUrl}${separator}redirectUrl=${encodeURIComponent(redirectUrl)}`;
+        
+        window.location.href = urlWithRedirect;
         return null;
+      }
+
+      // FIXED: Focus the popup window
+      if (popup.focus) {
+        popup.focus();
       }
 
       return popup;
     } catch (error) {
       console.error('Failed to open checkout popup:', error);
+      
+      // Fallback to direct redirect
       window.location.href = checkoutUrl;
       return null;
     }
   },
 
   /**
-   * Handle payment redirect success - simple verification only
+   * FIXED: Handle payment redirect success - simple verification only
    */
   handlePaymentRedirect: async (params: URLSearchParams): Promise<PaymentVerification | null> => {
     const reference = params.get('ref') || 
@@ -271,9 +310,9 @@ export const paymentApi = {
     }
 
     try {
-      // Simple verification - don't force any status
+      // FIXED: Simple verification - trust server completely
       const result = await paymentApi.verifyPayment(reference);
-      console.log('Payment redirect verified:', result.data.status);
+      console.log('Payment redirect verified:', result.data.status, result.data.settlement_status);
       return result;
     } catch (error) {
       console.error('Payment redirect verification failed:', error);
@@ -313,5 +352,29 @@ export const paymentApi = {
     }
 
     return { isValid: true };
+  },
+
+  /**
+   * FIXED: Get settlement status display text
+   */
+  getSettlementStatusText: (status?: string): string => {
+    switch (status) {
+      case 'COMPLETED': return 'Settled';
+      case 'FAILED': return 'Settlement Failed';
+      case 'PENDING': return 'Pending Settlement';
+      default: return 'Pending Settlement';
+    }
+  },
+
+  /**
+   * FIXED: Get settlement status color class
+   */
+  getSettlementStatusColor: (status?: string): string => {
+    switch (status) {
+      case 'COMPLETED': return 'text-green-600 bg-green-50 border-green-200';
+      case 'FAILED': return 'text-red-600 bg-red-50 border-red-200';
+      case 'PENDING': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      default: return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    }
   }
 };
