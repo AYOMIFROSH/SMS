@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { setupDatabase, initializeTables } = require('../Config/database');
-const { createPaymentTables, cleanupWebhookLogs, reconcileOrphanPayments } = require('../migration/migrateToSimplified')
+const { createEnhancedPaymentTables, migrateExistingPaymentData, maintainPaymentTables, getPaymentSystemHealth} = require('../migration/migrateToSimplified')
 const logger = require('../utils/logger');
 
 async function initializeDatabase() {
@@ -13,12 +13,14 @@ async function initializeDatabase() {
     await initializeTables();
     console.log('✅ All tables created successfully');
 
-    await createPaymentTables();
+    await createEnhancedPaymentTables();
 
-    await cleanupWebhookLogs();
+    await migrateExistingPaymentData();
 
-    await reconcileOrphanPayments();
-    
+    await maintainPaymentTables();
+
+    await getPaymentSystemHealth();
+
     console.log('🎉 Database initialization completed!');
     process.exit(0);
   } catch (error) {

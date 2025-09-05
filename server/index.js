@@ -13,6 +13,7 @@ const favicon = require('serve-favicon');
 const path = require('path');
 const fs = require('fs');
 
+
 const { setupDatabase, initializeTables } = require('./Config/database');
 const { setupRedis, getRedisClient } = require('./Config/redis');
 const sessionService = require('./services/sessionService');
@@ -21,6 +22,7 @@ const webSocketService = require('./services/webhookService');
 const monnifyService = require('./routes/monnifyService');
 const paymentWebhookProcessor = require('./services/paymentWebhookProcessor');
 const mobileOptimizationMiddleware = require('./middleware/mobile');
+const cronjobRecon = require('./services/reconciliationService')
 
 const app = express();
 const server = http.createServer(app);
@@ -124,8 +126,8 @@ const isValidMonnifyIP = (ip) => {
 };
 
 // CRITICAL: Monnify Webhook endpoint with raw body handling
+// Replace existing webhook endpoint with enhanced version
 app.post('/webhook/monnify', 
-  // Raw body parser for signature verification
   express.raw({ 
     type: 'application/json',
     limit: '10mb',
@@ -137,95 +139,36 @@ app.post('/webhook/monnify',
     const requestId = require('crypto').randomUUID();
     
     try {
-      // Log incoming webhook
       const clientIP = req.ip || req.connection.remoteAddress;
       
-      logger.info('Monnify webhook received', {
-        requestId,
-        clientIP,
-        hasSignature: !!(req.headers['x-monnify-signature'] || 
-                        req.headers['monnify-signature'] || 
-                        req.headers['X-Monnify-Signature']),
-        contentType: req.headers['content-type'],
-        bodyLength: req.body?.length || 0
-      });
-
-      // IP Validation (optional but recommended)
-      const isValidIP = isValidMonnifyIP(clientIP);
+      // IP validation (optional but recommended)
+      const MONNIFY_IPS = [
+        '35.242.133.146', // Primary Monnify IP
+        '::ffff:35.242.133.146',
+        '127.0.0.1', // Local testing
+        '::1'
+      ];
+      
+      const isValidIP = MONNIFY_IPS.includes(clientIP) || 
+                       MONNIFY_IPS.includes(clientIP?.replace('::ffff:', ''));
       
       if (!isValidIP && process.env.NODE_ENV === 'production') {
-        logger.warn('Webhook rejected: Invalid IP', {
-          requestId,
-          clientIP
-        });
-        
-        return res.status(403).json({ 
-          success: false, 
-          error: 'Forbidden',
-          requestId 
-        });
+        logger.warn('Webhook rejected: Invalid IP', { requestId, clientIP });
+        return res.status(403).json({ success: false, error: 'Forbidden' });
       }
 
-      // Add request ID to headers for tracking
       req.headers['x-request-id'] = requestId;
-      
-      // Delegate to webhook processor
       await paymentWebhookProcessor.handleWebhook(req, res);
       
     } catch (error) {
-      logger.error('Webhook route error', {
-        requestId,
-        error: error.message
-      });
+      logger.error('Webhook route error', { requestId, error: error.message });
       
       if (!res.headersSent) {
-        res.status(500).json({ 
-          success: false, 
-          error: 'Internal server error',
-          requestId
-        });
+        res.status(500).json({ success: false, error: 'Internal server error' });
       }
     }
   }
 );
-
-// Development test endpoint
-if (process.env.NODE_ENV === 'development') {
-  app.post('/webhook/test-monnify', express.json(), async (req, res) => {
-    logger.info('Test webhook triggered', { body: req.body });
-
-    try {
-      const testPayload = {
-        eventType: 'SUCCESSFUL_TRANSACTION',
-        eventData: {
-          transactionReference: 'TEST_' + Date.now(),
-          paymentReference: req.body.paymentReference || 'TEST_PAY_' + Date.now(),
-          amountPaid: req.body.amount || 1000,
-          paidOn: new Date().toISOString(),
-          paymentMethod: 'ACCOUNT_TRANSFER',
-          currency: 'NGN',
-          paymentStatus: 'PAID',
-          customer: {
-            email: req.body.email || 'test@example.com',
-            name: 'Test User'
-          }
-        }
-      };
-
-      req.body = testPayload;
-      req.rawBody = JSON.stringify(testPayload);
-      req.headers['x-monnify-signature'] = 'test-signature';
-      
-      await paymentWebhookProcessor.handleWebhook(req, res);
-      
-    } catch (error) {
-      logger.error('Test webhook error:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-}
-
-
 
 // Body parsing middleware for other endpoints
 app.use(express.json({
@@ -492,6 +435,8 @@ async function startServer() {
     if (missingVars.length > 0) {
       throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }
+
+    await cronjobRecon
 
     // Setup database
     await setupDatabase();

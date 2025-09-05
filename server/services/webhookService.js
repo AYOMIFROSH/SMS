@@ -1,4 +1,4 @@
-// services/websocketService.js
+// services/websocketService.js - FIXED with payment notification methods
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
@@ -6,19 +6,18 @@ const { getPool } = require('../Config/database');
 
 class WebSocketService {
   constructor() {
-    this.clients = new Map(); // userId (string) -> WebSocket
-    this.heartbeatInterval = 30000; // 30 seconds
-    this.cleanupInterval = 60000; // 1 minute
+    this.clients = new Map();
+    this.heartbeatInterval = 30000;
+    this.cleanupInterval = 60000;
     this.wss = null;
   }
 
   initialize(server) {
-    if (this.wss) return; // already initialized
+    if (this.wss) return;
 
     this.wss = new WebSocket.Server({
       server,
       path: '/ws',
-      // verifyClient is synchronous here to match ws expectations
       verifyClient: (info, done) => {
         try {
           const ok = this.verifyClientSync(info);
@@ -43,14 +42,12 @@ class WebSocketService {
       logger.error('WebSocket.Server error:', err);
     });
 
-    // Start heartbeat and cleanup intervals
     this.startHeartbeat();
     this.startCleanup();
 
-    logger.info('WebSocket service initialized');
+    logger.info('WebSocket service initialized with payment notifications');
   }
 
-  // synchronous verifier (ws expects sync verifyClient callback)
   verifyClientSync(info) {
     try {
       const reqUrl = info.req && info.req.url ? info.req.url : '';
@@ -63,47 +60,34 @@ class WebSocketService {
         return false;
       }
 
-      // Verify JWT token (this can throw)
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // decoded may not have userId
       const decodedUserId = decoded && (decoded.userId || decoded.id || decoded.sub);
-      if (!decodedUserId) {
-        logger.warn('WebSocket connection rejected: token decoded but no userId found', { url: reqUrl });
-        return false;
-      }
-
-      // Compare as strings but only after verifying values exist
-      if (String(decodedUserId) !== String(userIdParam)) {
+      
+      if (!decodedUserId || String(decodedUserId) !== String(userIdParam)) {
         logger.warn('WebSocket connection rejected: user ID mismatch', { decodedUserId, userIdParam });
         return false;
       }
 
-      // Attach verified info for use in handleConnection
       info.req.userId = String(userIdParam);
       info.req.user = decoded;
       return true;
     } catch (error) {
-      logger.warn('WebSocket verification failed:', error && error.message ? error.message : error);
+      logger.warn('WebSocket verification failed:', error?.message || error);
       return false;
     }
   }
 
   handleConnection(ws, req) {
-    // guard: ensure req.userId is present
-    const userId = req && req.userId ? String(req.userId) : null;
+    const userId = req?.userId;
     if (!userId) {
-      logger.warn('Incoming WS connection missing userId after verifyClient - closing', { url: req?.url, ip: req?.socket?.remoteAddress });
+      logger.warn('WebSocket connection missing userId after verification');
       try { ws.close(1008, 'Authentication required'); } catch (_) {}
       return;
     }
 
     logger.info(`WebSocket connected for user: ${userId}`);
-
-    // Store client connection (store key as string)
     this.clients.set(userId, ws);
 
-    // Setup message handlers with defensive wrappers
     ws.on('message', (data) => {
       try {
         this.handleMessage(ws, userId, data);
@@ -114,23 +98,25 @@ class WebSocketService {
 
     ws.on('close', (code, reason) => {
       try {
-        this.handleDisconnect(userId);
+        this.handleDisconnect(userId, code, reason);
       } catch (err) {
         logger.error('Error in close handler:', err);
       }
     });
 
     ws.on('error', (error) => {
-      logger.error(`WebSocket error for user ${userId}:`, error && error.message ? error.message : error);
+      logger.error(`WebSocket error for user ${userId}:`, error?.message || error);
     });
 
-    // Send connection confirmation (safe send)
     this.sendToUser(userId, {
       type: 'connection_established',
-      data: { userId, timestamp: new Date().toISOString() }
+      data: { 
+        userId, 
+        timestamp: new Date().toISOString(),
+        features: ['payments', 'sms', 'settlements']
+      }
     });
 
-    // Setup ping/pong for connection health
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
   }
@@ -139,29 +125,54 @@ class WebSocketService {
     try {
       const msgText = typeof data === 'string' ? data : data.toString();
       const message = JSON.parse(msgText);
+      
       logger.info(`WebSocket message from user ${userId}:`, message.type);
 
       switch (message.type) {
         case 'ping':
-          this.sendToUser(userId, { type: 'pong', data: { timestamp: Date.now() } });
+          this.sendToUser(userId, { 
+            type: 'pong', 
+            data: { 
+              timestamp: Date.now(),
+              messageId: message.messageId
+            } 
+          });
           break;
-        case 'subscribe_numbers':
-          // User wants to subscribe to number updates
-          this.sendToUser(userId, { type: 'subscribed', data: { topic: 'numbers' } });
+
+        case 'subscribe_payments':
+          this.sendToUser(userId, { 
+            type: 'subscribed', 
+            data: { topic: 'payments', timestamp: new Date().toISOString() } 
+          });
           break;
+
+        case 'get_connection_info':
+          this.sendToUser(userId, {
+            type: 'connection_info',
+            data: {
+              userId,
+              connected: true,
+              connectedAt: new Date().toISOString(),
+              clientCount: this.clients.size
+            }
+          });
+          break;
+
         default:
           logger.warn(`Unknown WebSocket message type: ${message.type}`, { userId });
       }
     } catch (error) {
-      logger.error(`Failed to parse WebSocket message from user ${userId}:`, error && error.message ? error.message : error);
+      logger.error(`Failed to parse WebSocket message from user ${userId}:`, error?.message || error);
     }
   }
 
-  handleDisconnect(userId) {
+  handleDisconnect(userId, code, reason) {
     try {
       if (!userId) return;
+      
       this.clients.delete(String(userId));
-      logger.info(`WebSocket disconnected for user: ${userId}`);
+      logger.info(`WebSocket disconnected for user: ${userId}`, { code, reason: reason?.toString() });
+
     } catch (err) {
       logger.error('Error during handleDisconnect:', err);
     }
@@ -173,36 +184,34 @@ class WebSocketService {
         logger.warn('sendToUser called with invalid userId', { userId, messageType: message?.type });
         return false;
       }
+      
       const key = String(userId);
       const client = this.clients.get(key);
 
-      if (!client) {
-        logger.warn('sendToUser: no websocket found for user', { userId: key });
+      if (!client || client.readyState !== WebSocket.OPEN) {
+        logger.debug('sendToUser: websocket not available', { userId: key, type: message?.type });
         return false;
       }
 
-      // Ensure connection is open
-      if (client.readyState !== WebSocket.OPEN) {
-        logger.warn('sendToUser: websocket not open', { userId: key, readyState: client.readyState });
-        // cleanup stale reference
-        this.clients.delete(key);
-        return false;
-      }
+      const enrichedMessage = {
+        ...message,
+        timestamp: new Date().toISOString(),
+        userId: parseInt(userId),
+        messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      };
 
-      // Safe stringify
-      const payload = (typeof message === 'string') ? message : JSON.stringify(message);
+      const payload = JSON.stringify(enrichedMessage);
 
       client.send(payload, (err) => {
         if (err) {
           logger.error('ws.send callback error', { userId: key, err: err.message || err });
-          // remove client to avoid repeated failures
           this.clients.delete(key);
         }
       });
 
       return true;
     } catch (err) {
-      logger.error('sendToUser unexpected error:', err && err.message ? err.message : err);
+      logger.error('sendToUser unexpected error:', err?.message || err);
       return false;
     }
   }
@@ -220,60 +229,94 @@ class WebSocketService {
     logger.info(`Broadcast message sent to ${sentCount} clients`);
   }
 
-  // Specific message types for SMS operations
-  notifyNumberPurchased(userId, data) {
+  // FIXED: Payment notification methods
+  notifyPaymentSuccessful(userId, data) {
     return this.sendToUser(userId, {
-      type: 'number_purchased',
+      type: 'payment_successful',
       data: {
-        activationId: data.activationId,
-        number: data.number,
-        service: data.service,
-        country: data.country,
+        paymentReference: data.paymentReference,
+        transactionReference: data.transactionReference,
+        amount: data.amount,
+        amountPaid: data.amountPaid,
+        currency: data.currency || 'NGN',
+        paymentMethod: data.paymentMethod,
+        newBalance: data.newBalance,
+        previousBalance: data.previousBalance,
+        fee: data.fee,
+        settlementAmount: data.settlementAmount,
+        settlementStatus: data.settlementStatus || 'PENDING',
         timestamp: new Date().toISOString()
       }
     });
   }
 
-  notifySmsReceived(userId, data) {
+  notifyPaymentFailed(userId, data) {
     return this.sendToUser(userId, {
-      type: 'sms_received',
+      type: 'payment_failed',
       data: {
-        activationId: data.activationId,
-        code: data.code,
+        paymentReference: data.paymentReference,
+        transactionReference: data.transactionReference,
+        amount: data.amount,
+        reason: data.reason,
+        responseCode: data.responseCode,
         timestamp: new Date().toISOString()
       }
     });
   }
 
-  notifyBalanceUpdated(userId, balance) {
+  notifyPaymentReversed(userId, data) {
+    return this.sendToUser(userId, {
+      type: 'payment_reversed',
+      data: {
+        transactionReference: data.transactionReference,
+        paymentReference: data.paymentReference,
+        reversalAmount: data.reversalAmount,
+        reason: data.reason,
+        newBalance: data.newBalance,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+
+  notifyBalanceUpdated(userId, newBalance, changeAmount = 0) {
     return this.sendToUser(userId, {
       type: 'balance_updated',
       data: {
-        balance: parseFloat(balance),
+        balance: parseFloat(newBalance),
+        change: parseFloat(changeAmount),
         timestamp: new Date().toISOString()
       }
     });
   }
 
-  notifyNumberExpired(userId, activationId) {
+  // FIXED: Settlement notification methods
+  notifySettlementCompleted(userId, data) {
     return this.sendToUser(userId, {
-      type: 'number_expired',
+      type: 'settlement_completed',
       data: {
-        activationId,
+        settlementReference: data.settlementReference,
+        settlementAmount: data.settlementAmount,
+        settlementDate: data.settlementDate,
+        transactionCount: data.transactionCount,
         timestamp: new Date().toISOString()
       }
     });
   }
 
-  notifyWebhookUpdate(userId, data) {
+  notifySettlementFailed(userId, data) {
     return this.sendToUser(userId, {
-      type: 'sms_webhook_update',
-      data
+      type: 'settlement_failed',
+      data: {
+        settlementReference: data.settlementReference,
+        failureReason: data.failureReason,
+        timestamp: new Date().toISOString()
+      }
     });
   }
 
   startHeartbeat() {
     if (!this.wss) return;
+    
     setInterval(() => {
       try {
         this.wss.clients?.forEach((ws) => {
@@ -285,7 +328,7 @@ class WebSocketService {
           try { ws.ping(); } catch (e) {}
         });
       } catch (err) {
-        logger.warn('Heartbeat iteration error:', err && err.message ? err.message : err);
+        logger.warn('Heartbeat iteration error:', err?.message || err);
       }
     }, this.heartbeatInterval);
   }
@@ -299,9 +342,16 @@ class WebSocketService {
           }
         }
       } catch (err) {
-        logger.warn('Cleanup iteration error:', err && err.message ? err.message : err);
+        logger.warn('Cleanup iteration error:', err?.message || err);
       }
     }, this.cleanupInterval);
+  }
+
+  getStats() {
+    return {
+      connectedClients: this.clients.size,
+      totalConnections: this.wss?.clients?.size || 0
+    };
   }
 
   getConnectedUsers() {
