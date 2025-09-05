@@ -1,4 +1,4 @@
-// src/App.tsx - Updated with payment success route
+// src/App.tsx - Fixed TypeScript error by removing non-existent method
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -17,7 +17,6 @@ import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoadingSpinner from './components/common/LoadingSpinner';
 import useWebSocket from './hooks/useWebsocket';
 import useAuth from '@/hooks/useAuth';
-import { usePayment } from '@/hooks/usePayment';
 import { healthCheck } from '@/api/client';
 import { Analytics } from '@vercel/analytics/react';
 
@@ -99,8 +98,7 @@ const AppContent: React.FC = () => {
   const { isConnected: wsConnected = false, connectionError: wsError = null } = ws;
   const hasConnectionIssue = !wsConnected && Boolean(wsError);
 
-  // Initialize payment hook for WebSocket integration
-  const { handleWebSocketUpdate } = usePayment();
+  // FIXED: Removed non-existent handleWebSocketUpdate method
 
   useEffect(() => {
     if (wsConnected) {
@@ -112,29 +110,8 @@ const AppContent: React.FC = () => {
     }
   }, [wsConnected]);
 
-  // Handle WebSocket messages related to payments
-  useEffect(() => {
-    const handleWebSocketMessage = (event: CustomEvent) => {
-      const { type, data } = event.detail;
-      
-      // Handle payment-related WebSocket messages
-      if ([
-        'payment_successful',
-        'payment_failed', 
-        'payment_cancelled',
-        'payment_reversed',
-        'balance_updated'
-      ].includes(type)) {
-        handleWebSocketUpdate({ type, data });
-      }
-    };
-
-    window.addEventListener('websocket:message', handleWebSocketMessage as EventListener);
-    return () => {
-      window.removeEventListener('websocket:message', handleWebSocketMessage as EventListener);
-    };
-  }, [handleWebSocketUpdate]);
-
+  // FIXED: Removed WebSocket message handling since it's already handled in usePayment hook via useWebSocket
+  
   console.log('App render state:', {
     isAuthenticated,
     isReady,
