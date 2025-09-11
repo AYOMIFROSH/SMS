@@ -110,7 +110,7 @@ const AppContent: React.FC = () => {
   }, [wsConnected]);
 
   // FIXED: Removed WebSocket message handling since it's already handled in usePayment hook via useWebSocket
-  
+
   console.log('App render state:', {
     isAuthenticated,
     isReady,
@@ -131,7 +131,7 @@ const AppContent: React.FC = () => {
     );
   }
 
-  if (hasError && needsLogin) {
+  if (hasError && !needsLogin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-red-50">
         <div className="text-center max-w-md mx-auto p-6">
