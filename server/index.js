@@ -1,4 +1,3 @@
-// index.js - Fixed webhook endpoint with comprehensive debugging and IP validation
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -19,13 +18,12 @@ const { setupRedis, getRedisClient } = require('./Config/redis');
 const sessionService = require('./services/sessionService');
 const logger = require('./utils/logger');
 const webSocketService = require('./services/webhookService');
-const monnifyService = require('./routes/monnifyService');
-const paymentWebhookProcessor = require('./services/paymentWebhookProcessor');
 const mobileOptimizationMiddleware = require('./middleware/mobile');
-const cronjobRecon = require('./services/reconciliationService')
 
 const app = express();
 const server = http.createServer(app);
+
+require('./cron/reconcileJob'); // start reconcile job
 
 const assetsPath = path.join(__dirname, 'assets');
 app.use('/assets', express.static(assetsPath));
@@ -101,89 +99,12 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(compression({ level: 6, threshold: 1024 }));
 
-// Extract from index.js - Updated webhook endpoint
 
-// Monnify IP whitelist
-const MONNIFY_IPS = [
-  '35.242.133.146', // Primary Monnify IP
-  '::ffff:35.242.133.146', // IPv6 mapped IPv4
-  '127.0.0.1', // Local testing
-  '::1' // IPv6 localhost
-];
+app.use('/api/payments/flutterwave', require('./routes/flutterwaveWebhook'));
 
-// Helper to validate Monnify IP
-const isValidMonnifyIP = (ip) => {
-  const realIP = ip?.replace('::ffff:', '');
-  
-  // Allow localhost in development
-  if (process.env.NODE_ENV === 'development') {
-    if (ip === '127.0.0.1' || ip === '::1' || realIP === '127.0.0.1') {
-      return true;
-    }
-  }
-  
-  return MONNIFY_IPS.includes(ip) || MONNIFY_IPS.includes(realIP);
-};
+app.use(express.json()); // for parsing application/json
+app.use(express.urlencoded({ extended: true })); // if you also accept form data
 
-// CRITICAL: Monnify Webhook endpoint with raw body handling
-// Replace existing webhook endpoint with enhanced version
-app.post('/webhook/monnify', 
-  express.raw({ 
-    type: 'application/json',
-    limit: '10mb',
-    verify: (req, res, buf) => {
-      req.rawBody = buf;
-    }
-  }),
-  async (req, res) => {
-    const requestId = require('crypto').randomUUID();
-    
-    try {
-      const clientIP = req.ip || req.connection.remoteAddress;
-      
-      // IP validation (optional but recommended)
-      const MONNIFY_IPS = [
-        '35.242.133.146', // Primary Monnify IP
-        '::ffff:35.242.133.146',
-        '127.0.0.1', // Local testing
-        '::1'
-      ];
-      
-      const isValidIP = MONNIFY_IPS.includes(clientIP) || 
-                       MONNIFY_IPS.includes(clientIP?.replace('::ffff:', ''));
-      
-      if (!isValidIP && process.env.NODE_ENV === 'production') {
-        logger.warn('Webhook rejected: Invalid IP', { requestId, clientIP });
-        return res.status(403).json({ success: false, error: 'Forbidden' });
-      }
-
-      req.headers['x-request-id'] = requestId;
-      await paymentWebhookProcessor.handleWebhook(req, res);
-      
-    } catch (error) {
-      logger.error('Webhook route error', { requestId, error: error.message });
-      
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: 'Internal server error' });
-      }
-    }
-  }
-);
-
-// Body parsing middleware for other endpoints
-app.use(express.json({
-  limit: '10mb',
-  verify: (req, res, buf) => {
-    // Skip webhook endpoints
-    if (req.path.includes('/webhook/')) return;
-    req.rawBody = buf.toString('utf8');
-  }
-}));
-
-app.use(express.urlencoded({
-  extended: true,
-  limit: '10mb'
-}));
 
 // Session Configuration
 const sessionMiddleware = async () => {
@@ -275,6 +196,16 @@ app.get('/api/health', async (req, res) => {
   try {
     const sessionStats = await sessionService.getSessionStats();
 
+    // Get pending settlements count (optional)
+    let pendingSettlements = 0;
+    try {
+      const flutterwaveService = require('./services/flutterwaveServices');
+      const monitor = await flutterwaveService.monitorPendingSettlements();
+      pendingSettlements = monitor.total_pending;
+    } catch (monitorError) {
+      logger.warn('Pending settlements monitoring failed:', monitorError);
+    }
+
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -288,10 +219,15 @@ app.get('/api/health', async (req, res) => {
       database: { connected: true },
       redis: { connected: getRedisClient()?.isOpen || false },
       sessions: sessionStats,
-      webhook: {
-        endpoint: '/webhook/monnify',
-        allowedIPs: MONNIFY_IPS,
-        environment: process.env.NODE_ENV
+      flutterwave: {
+        checked: false,
+        note: "Use /api/flutterwave/health to check provider status"
+      },
+      payment_system: {
+        provider: 'flutterwave',
+        webhook_endpoint: '/api/payments/flutterwave',
+        pending_settlements: pendingSettlements,
+        monitoring_enabled: true
       },
       requestId: req.requestId
     });
@@ -305,26 +241,23 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Enhanced webhook debugging endpoint
-app.get('/api/webhook/debug', (req, res) => {
-  res.json({
-    webhookEndpoint: '/webhook/monnify',
-    testEndpoint: process.env.NODE_ENV === 'development' ? '/webhook/test-monnify' : null,
-    allowedIPs: MONNIFY_IPS,
-    environment: process.env.NODE_ENV,
-    serverTime: new Date().toISOString(),
-    expectedHeaders: [
-      'x-monnify-signature',
-      'monnify-signature',
-      'X-Monnify-Signature'
-    ],
-    paymentService: {
-      apiUrl: process.env.NODE_ENV === 'production' ? 'https://api.monnify.com' : 'https://sandbox.monnify.com',
-      hasApiKey: !!process.env.MONNIFY_API_KEY,
-      hasSecretKey: !!process.env.MONNIFY_SECRET_KEY,
-      hasContractCode: !!process.env.MONNIFY_CONTRACT_CODE
-    }
-  });
+app.get('/api/flutterwave/health', async (req, res) => {
+  try {
+    const flutterwaveService = require('./services/flutterwaveServices');
+    const health = await flutterwaveService.healthCheck();
+
+    res.json({
+      service: 'flutterwave',
+      ...health
+    });
+  } catch (error) {
+    logger.error('Flutterwave health check error:', error);
+    res.status(503).json({
+      service: 'flutterwave',
+      healthy: false,
+      error: error.message
+    });
+  }
 });
 
 // CSRF token endpoint
@@ -346,8 +279,8 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     webhook: {
-      monnify: '/webhook/monnify',
-      test: process.env.NODE_ENV === 'development' ? '/webhook/test-monnify' : undefined
+      flutterwave: '/api/payments/flutterwave',
+      test: process.env.NODE_ENV === 'development' ? '/webhook-test' : undefined
     },
     endpoints: {
       health: '/api/health',
@@ -427,8 +360,8 @@ async function startServer() {
     const requiredEnvVars = [
       'DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME',
       'EXISTING_DB_HOST', 'EXISTING_DB_USER', 'EXISTING_DB_PASSWORD', 'EXISTING_DB_NAME',
-      'JWT_SECRET', 'SESSION_SECRET', 'SMS_ACTIVATE_API_KEY',
-      'MONNIFY_API_KEY', 'MONNIFY_SECRET_KEY', 'MONNIFY_CONTRACT_CODE'
+      'JWT_SECRET', 'SESSION_SECRET', 'SMS_ACTIVATE_API_KEY', 'FLW_SECRET_KEY',
+      'FLW_PUBLIC_KEY', 'FLW_SECRET_HASH', 'FLW_ENCRYPTION_KEY'
     ];
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -436,12 +369,23 @@ async function startServer() {
       throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }
 
-    await cronjobRecon
 
     // Setup database
     await setupDatabase();
     await initializeTables();
     logger.info('✅ Database connected and initialized');
+
+    try {
+      const flutterwaveService = require('./services/flutterwaveServices');
+      if (process.env.FLW_SECRET_KEY && process.env.FLW_PUBLIC_KEY && process.env.FLW_SECRET_HASH) {
+        flutterwaveService.validateConfig();
+        logger.info('✅ Flutterwave service configured and ready');
+      } else {
+        logger.warn('⚠️ Flutterwave service disabled - missing configuration');
+      }
+    } catch (flutterwaveError) {
+      logger.error('❌ Flutterwave service initialization failed:', flutterwaveError.message);
+    }
 
     // Setup Redis
     try {
@@ -449,14 +393,6 @@ async function startServer() {
       logger.info('✅ Redis connected for session caching');
     } catch (redisError) {
       logger.warn('⚠️ Redis connection failed, using memory store:', redisError.message);
-    }
-
-    // Test Monnify service
-    try {
-      const monnifyHealth = await monnifyService.healthCheck();
-      logger.info('✅ Monnify service health check:', monnifyHealth);
-    } catch (monnifyError) {
-      logger.warn('⚠️ Monnify service connection warning:', monnifyError.message);
     }
 
     // Apply session middleware
@@ -472,19 +408,21 @@ async function startServer() {
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, '::', () => {
       logger.info(`
-        ✅ Enhanced SMS Platform Server Running
-        🌐 Port: ${PORT}
-        🏥 Health: http://localhost:${PORT}/api/health
-        🔧 Webhook Debug: http://localhost:${PORT}/api/webhook/debug
-        🎯 Monnify Webhook: http://localhost:${PORT}/webhook/monnify
-        ${process.env.NODE_ENV === 'development' ? '🧪 Test Webhook: http://localhost:${PORT}/webhook/test-monnify' : ''}
-        📚 Docs: http://localhost:${PORT}/api/docs
-        🖥️ Frontend: ${FRONTEND_URL}
-        🔐 Security: Enhanced IP validation + CSRF + JWT
-        💾 Sessions: ${getRedisClient()?.isOpen ? 'Redis' : 'Memory'}
-        💳 Payments: Monnify Enhanced Integration
-        🚨 Allowed IPs: ${MONNIFY_IPS.join(', ')}
-      `);
+  ✅ Enhanced SMS Platform Server Running
+  🌐 Port: ${PORT}  
+  🏥 Health: http://localhost:${PORT}/api/health
+  💳 Payment Provider: Flutterwave
+  🎯 Flutterwave Webhook: http://localhost:${PORT}/api/payments/flutterwave/webhook
+  📊 Flutterwave Health: http://localhost:${PORT}/api/flutterwave/health
+  ${process.env.NODE_ENV === 'development' ? '🧪 Test Webhook: http://localhost:${PORT}/api/payments/flutterwave/webhook/test' : ''}
+  📚 Docs: http://localhost:${PORT}/api/docs
+  🖥️ Frontend: ${FRONTEND_URL}
+  🔐 Security: Enhanced IP validation + CSRF + JWT
+  💾 Sessions: ${getRedisClient()?.isOpen ? 'Redis' : 'Memory'}
+  💰 Exchange Rate: Live USD/NGN conversion
+  🔔 Real-time: WebSocket notifications enabled
+  📈 Monitoring: Pending settlements tracking
+`);
     });
 
     // Cleanup intervals
@@ -503,19 +441,43 @@ async function startServer() {
     logger.error('❌ Server startup failed:', error);
     process.exit(1);
   }
+
 }
+
+setInterval(async () => {
+  try {
+    const flutterwaveService = require('./services/flutterwaveServices');
+    const monitor = await flutterwaveService.monitorPendingSettlements();
+
+    if (monitor.alert_threshold_exceeded) {
+      logger.error('🚨 ALERT: High number of pending settlements detected', {
+        total_pending: monitor.total_pending,
+        old_pending: monitor.old_pending
+      });
+
+      // You could send alerts to Slack, email, etc. here
+      // Example: await sendSlackAlert(`Alert: ${monitor.old_pending} payments pending over 24h`);
+    } else if (monitor.old_pending > 0) {
+      logger.warn('⚠️ Some payments pending settlement', {
+        old_pending: monitor.old_pending
+      });
+    }
+  } catch (error) {
+    logger.warn('Pending settlements monitoring error:', error.message);
+  }
+}, 60 * 60 * 1000); // Every hour
 
 // Graceful shutdown
 async function gracefulShutdown(signal) {
   logger.info(`\n${signal} received, starting graceful shutdown...`);
-  
+
   const { getPool, getExistingDbPool } = require('./Config/database');
   const { getRedisClient } = require('./Config/redis');
-  
+
   try {
     // 1. Stop accepting new connections
     logger.info('⏹ Stopping server...');
-    
+
     // 2. Close WebSocket connections
     const webSocketService = require('./services/webhookService');
     if (webSocketService.wss) {
@@ -523,7 +485,7 @@ async function gracefulShutdown(signal) {
         ws.close(1000, 'Server shutting down');
       });
     }
-    
+
     // 3. Wait for existing requests to complete (max 30s)
     await new Promise(resolve => {
       const timeout = setTimeout(resolve, 30000);
@@ -532,31 +494,31 @@ async function gracefulShutdown(signal) {
         resolve();
       });
     });
-    
+
     // 4. Close database connections
     const pool = getPool();
     const existingPool = getExistingDbPool();
-    
+
     if (pool) {
       await pool.end();
       logger.info('✅ Main database connection closed');
     }
-    
+
     if (existingPool) {
       await existingPool.end();
       logger.info('✅ Existing database connection closed');
     }
-    
+
     // 5. Close Redis connection
     const redis = getRedisClient();
     if (redis && redis.isOpen) {
       await redis.quit();
       logger.info('✅ Redis connection closed');
     }
-    
+
     logger.info('✅ Graceful shutdown completed');
     process.exit(0);
-    
+
   } catch (error) {
     logger.error('❌ Shutdown error:', error);
     process.exit(1);

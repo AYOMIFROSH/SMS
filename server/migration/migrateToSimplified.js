@@ -1,468 +1,489 @@
-// migrations/enhancedPaymentSchema.js - Complete payment schema with settlement support
+// migrations/migrateToSimplified.js - Fixed migration with missing columns
 const { getPool } = require('../Config/database');
 const logger = require('../utils/logger');
 
-async function createEnhancedPaymentTables() {
-  const pool = getPool();
-
-  try {
-    logger.info('Creating enhanced payment tables for complete Monnify integration...');
-
-    // Enhanced payment transactions table
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS payment_transactions (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        payment_reference VARCHAR(100) UNIQUE NOT NULL,
-        transaction_reference VARCHAR(100) UNIQUE,
-        monnify_transaction_reference VARCHAR(100),
-        amount DECIMAL(10, 2) NOT NULL,
-        amount_paid DECIMAL(10, 2) DEFAULT 0,
-        currency VARCHAR(10) DEFAULT 'NGN',
-        status ENUM('PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED', 'REVERSED') DEFAULT 'PENDING',
-        payment_status VARCHAR(50),
-        payment_method VARCHAR(50),
-        customer_name VARCHAR(255),
-        customer_email VARCHAR(255),
-        customer_phone VARCHAR(20),
-        payment_description TEXT,
-        checkout_url TEXT,
-        account_details JSON,
-        
-        -- Settlement fields
-        settlement_reference VARCHAR(100),
-        settlement_date TIMESTAMP NULL,
-        settlement_status ENUM('PENDING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING',
-        settlement_amount DECIMAL(10, 2),
-        transaction_fee DECIMAL(10, 2),
-        
-        -- Response fields
-        response_code VARCHAR(20),
-        failure_reason TEXT,
-        
-        -- Timestamps
-        paid_at TIMESTAMP NULL,
-        expires_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        
-        -- Indexes for performance
-        INDEX idx_user_id (user_id),
-        INDEX idx_status (status),
-        INDEX idx_settlement_status (settlement_status),
-        INDEX idx_payment_ref (payment_reference),
-        INDEX idx_transaction_ref (transaction_reference),
-        INDEX idx_settlement_ref (settlement_reference),
-        INDEX idx_created_at (created_at),
-        INDEX idx_paid_at (paid_at),
-        INDEX idx_expires_at (expires_at),
-        INDEX idx_user_status (user_id, status),
-        INDEX idx_settlement_date (settlement_date)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created/updated payment_transactions table');
-
-    // Settlement logs table for detailed settlement tracking
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS settlement_logs (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        settlement_reference VARCHAR(100) UNIQUE NOT NULL,
-        settlement_id VARCHAR(100),
-        merchant_id VARCHAR(100),
-        amount DECIMAL(10, 2) NOT NULL,
-        settlement_date TIMESTAMP NULL,
-        batch_reference VARCHAR(100),
-        transaction_count INT DEFAULT 0,
-        settlement_data JSON,
-        failure_reason TEXT,
-        status ENUM('COMPLETED', 'FAILED', 'PENDING') DEFAULT 'PENDING',
-        
-        -- Settlement analytics
-        total_fees DECIMAL(10, 2) DEFAULT 0,
-        net_settlement DECIMAL(10, 2),
-        currency VARCHAR(10) DEFAULT 'NGN',
-        
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        
-        INDEX idx_settlement_ref (settlement_reference),
-        INDEX idx_status (status),
-        INDEX idx_settlement_date (settlement_date),
-        INDEX idx_batch_ref (batch_reference),
-        INDEX idx_created_at (created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created settlement_logs table');
-
-    // Enhanced webhook logs table
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS webhook_logs (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        webhook_type VARCHAR(50) NOT NULL DEFAULT 'monnify',
-        event_type VARCHAR(50) NOT NULL,
-        transaction_reference VARCHAR(100),
-        payment_reference VARCHAR(100),
-        settlement_reference VARCHAR(100),
-        payload JSON NOT NULL,
-        signature_valid BOOLEAN DEFAULT FALSE,
-        processed BOOLEAN DEFAULT FALSE,
-        error_message TEXT,
-        processing_time_ms INT,
-        retry_count INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        processed_at TIMESTAMP NULL,
-        
-        INDEX idx_webhook_type (webhook_type),
-        INDEX idx_event_type (event_type),
-        INDEX idx_processed (processed),
-        INDEX idx_created_at (created_at),
-        INDEX idx_transaction_ref (transaction_reference),
-        INDEX idx_payment_ref (payment_reference),
-        INDEX idx_settlement_ref (settlement_reference),
-        INDEX idx_type_processed (webhook_type, processed, created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created webhook_logs table');
-
-    // Orphan payments table for reconciliation
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS orphan_payments (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        transaction_reference VARCHAR(100),
-        payment_reference VARCHAR(100),
-        amount DECIMAL(10, 2),
-        payment_method VARCHAR(50),
-        customer_email VARCHAR(255),
-        event_data JSON,
-        reconciled BOOLEAN DEFAULT FALSE,
-        reconciled_user_id INT NULL,
-        reconciled_at TIMESTAMP NULL,
-        investigation_notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        
-        UNIQUE KEY unique_refs (transaction_reference, payment_reference),
-        INDEX idx_reconciled (reconciled),
-        INDEX idx_customer_email (customer_email),
-        INDEX idx_created_at (created_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created orphan_payments table');
-
-    // Unknown webhook events for investigation
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS unknown_webhook_events (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        event_type VARCHAR(100) NOT NULL,
-        event_data JSON NOT NULL,
-        request_id VARCHAR(100),
-        investigated BOOLEAN DEFAULT FALSE,
-        investigation_notes TEXT,
-        investigated_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        
-        INDEX idx_event_type (event_type),
-        INDEX idx_investigated (investigated),
-        INDEX idx_created_at (created_at),
-        INDEX idx_request_id (request_id)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created unknown_webhook_events table');
-
-    // Payment analytics table
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS payment_analytics (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT,
-        date DATE NOT NULL,
-        total_successful INT DEFAULT 0,
-        total_failed INT DEFAULT 0,
-        total_amount DECIMAL(10, 2) DEFAULT 0,
-        total_fees DECIMAL(10, 2) DEFAULT 0,
-        average_amount DECIMAL(10, 2) DEFAULT 0,
-        payment_methods JSON,
-        settlement_amount DECIMAL(10, 2) DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        
-        UNIQUE KEY unique_user_date (user_id, date),
-        INDEX idx_user_id (user_id),
-        INDEX idx_date (date),
-        INDEX idx_user_date (user_id, date)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created payment_analytics table');
-
-    // Balance discrepancies table
-    await pool.execute(`
-      CREATE TABLE IF NOT EXISTS balance_discrepancies (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
-        current_balance DECIMAL(10, 2),
-        calculated_balance DECIMAL(10, 2),
-        difference DECIMAL(10, 2),
-        discrepancy_type ENUM('payment', 'settlement', 'manual') DEFAULT 'payment',
-        resolved BOOLEAN DEFAULT FALSE,
-        resolution_notes TEXT,
-        resolved_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        
-        INDEX idx_user_id (user_id),
-        INDEX idx_resolved (resolved),
-        INDEX idx_created_at (created_at),
-        INDEX idx_discrepancy_type (discrepancy_type)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    logger.info('✅ Created balance_discrepancies table');
-
-    // Update existing tables with new columns
-    const alterQueries = [
-      // Add settlement columns to payment_transactions if missing
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS settlement_reference VARCHAR(100) AFTER monnify_transaction_reference`,
-      
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS settlement_date TIMESTAMP NULL AFTER settlement_reference`,
-      
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS settlement_status ENUM('PENDING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING' AFTER settlement_date`,
-       
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS settlement_amount DECIMAL(10, 2) AFTER settlement_status`,
-       
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS transaction_fee DECIMAL(10, 2) AFTER settlement_amount`,
-       
-      `ALTER TABLE payment_transactions 
-       ADD COLUMN IF NOT EXISTS response_code VARCHAR(20) AFTER transaction_fee`,
-
-      // Enhance sms_user_accounts
-      `ALTER TABLE sms_user_accounts 
-       ADD COLUMN IF NOT EXISTS total_deposited DECIMAL(10, 2) DEFAULT 0 AFTER balance`,
-
-      `ALTER TABLE sms_user_accounts 
-       ADD COLUMN IF NOT EXISTS last_deposit_at TIMESTAMP NULL AFTER total_deposited`,
-
-      `ALTER TABLE sms_user_accounts 
-       ADD COLUMN IF NOT EXISTS deposit_count INT DEFAULT 0 AFTER last_deposit_at`,
-       
-      `ALTER TABLE sms_user_accounts 
-       ADD COLUMN IF NOT EXISTS total_fees_paid DECIMAL(10, 2) DEFAULT 0 AFTER deposit_count`,
-
-      // Enhance transactions table
-      `ALTER TABLE transactions 
-       ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) AFTER status`,
-
-      `ALTER TABLE transactions 
-       ADD COLUMN IF NOT EXISTS balance_before DECIMAL(10, 2) AFTER amount`,
-
-      `ALTER TABLE transactions 
-       ADD COLUMN IF NOT EXISTS balance_after DECIMAL(10, 2) AFTER balance_before`,
-       
-      `ALTER TABLE transactions 
-       ADD COLUMN IF NOT EXISTS settlement_reference VARCHAR(100) AFTER reference_id`,
-       
-      `ALTER TABLE transactions 
-       ADD COLUMN IF NOT EXISTS transaction_fee DECIMAL(10, 2) AFTER settlement_reference`
-    ];
-
-    for (const query of alterQueries) {
-      try {
-        await pool.execute(query);
-      } catch (error) {
-        if (!error.message.includes('Duplicate column')) {
-          logger.warn(`ALTER TABLE warning: ${error.message}`);
-        }
-      }
-    }
-
-    logger.info('✅ Updated existing tables with new columns');
-
-    // Create performance indexes
-    const indexQueries = [
-      `CREATE INDEX IF NOT EXISTS idx_payment_user_status 
-       ON payment_transactions(user_id, status)`,
-
-      `CREATE INDEX IF NOT EXISTS idx_payment_settlement 
-       ON payment_transactions(settlement_reference, settlement_status)`,
-
-      `CREATE INDEX IF NOT EXISTS idx_payment_settlement_date 
-       ON payment_transactions(settlement_date)`,
-
-      `CREATE INDEX IF NOT EXISTS idx_transaction_user_type 
-       ON transactions(user_id, transaction_type)`,
-
-      `CREATE INDEX IF NOT EXISTS idx_sms_account_user 
-       ON sms_user_accounts(user_id)`,
-       
-      `CREATE INDEX IF NOT EXISTS idx_webhook_logs_type_processed 
-       ON webhook_logs(webhook_type, processed, created_at)`
-    ];
-
-    for (const query of indexQueries) {
-      try {
-        await pool.execute(query);
-      } catch (error) {
-        if (!error.message.includes('Duplicate key')) {
-          logger.warn(`CREATE INDEX warning: ${error.message}`);
-        }
-      }
-    }
-
-    logger.info('✅ Created performance indexes');
-
-    logger.info('✅ Enhanced payment schema creation completed successfully');
-    return { success: true };
-
-  } catch (error) {
-    logger.error('Failed to create enhanced payment schema:', error);
-    throw error;
-  }
-}
-
-// Function to migrate existing data to new schema
-async function migrateExistingPaymentData() {
+async function runFlutterwaveMigration() {
   const pool = getPool();
   
   try {
-    logger.info('Migrating existing payment data to enhanced schema...');
-
-    // Update settlement status for old payments
-    await pool.execute(`
-      UPDATE payment_transactions 
-      SET settlement_status = 'COMPLETED'
-      WHERE status = 'PAID' 
-      AND settlement_status IS NULL
-      AND paid_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
-    `);
-
-    // Set default settlement status for recent payments
-    await pool.execute(`
-      UPDATE payment_transactions 
-      SET settlement_status = 'PENDING'
-      WHERE status = 'PAID' 
-      AND settlement_status IS NULL
-      AND paid_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-    `);
-
-    // Update failed/cancelled payments settlement status
-    await pool.execute(`
-      UPDATE payment_transactions 
-      SET settlement_status = 'FAILED'
-      WHERE status IN ('FAILED', 'CANCELLED', 'EXPIRED', 'REVERSED') 
-      AND settlement_status = 'PENDING'
-    `);
-
-    logger.info('✅ Migration of existing payment data completed');
-    return { success: true };
-
-  } catch (error) {
-    logger.error('Failed to migrate existing payment data:', error);
-    throw error;
-  }
-}
-
-// Function to cleanup old logs and maintain performance
-async function maintainPaymentTables() {
-  const pool = getPool();
-  
-  try {
-    logger.info('Running payment table maintenance...');
-
-    // Cleanup old webhook logs (keep 30 days)
-    const [webhookResult] = await pool.execute(`
-      DELETE FROM webhook_logs 
-      WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)
-      AND processed = TRUE
-    `);
-
-    // Cleanup old unknown webhook events (keep investigated ones longer)
-    const [unknownResult] = await pool.execute(`
-      DELETE FROM unknown_webhook_events 
-      WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY)
-      AND investigated = TRUE
-    `);
-
-    // Archive old payment analytics (older than 1 year)
-    // You might want to export these to a data warehouse instead
+    logger.info('🚀 Starting Flutterwave migration...');
     
-    logger.info(`Maintenance completed: ${webhookResult.affectedRows} webhook logs, ${unknownResult.affectedRows} unknown events cleaned`);
-
-    return {
-      webhookLogs: webhookResult.affectedRows,
-      unknownEvents: unknownResult.affectedRows
-    };
-
+    // Step 1: Create Flutterwave tables
+    await createFlutterwaveTables(pool);
+    
+    // Step 2: Migrate existing data
+    await migrateExistingData(pool);
+    
+    // Step 3: Create monitoring views
+    await createMonitoringViews(pool);
+    
+    // Step 4: Set up initial configuration
+    await setupInitialConfiguration(pool);
+    
+    logger.info('✅ Flutterwave migration completed successfully');
+    return { success: true };
+    
   } catch (error) {
-    logger.error('Payment table maintenance failed:', error);
+    logger.error('❌ Migration failed:', error);
     throw error;
   }
 }
 
-// Function to get comprehensive payment system health
-async function getPaymentSystemHealth() {
+async function createFlutterwaveTables(pool) {
+  logger.info('Creating Flutterwave tables...');
+  
+  const tables = [
+    // Payment deposits table - FIXED: Added missing columns
+    `CREATE TABLE IF NOT EXISTS payment_deposits (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      tx_ref VARCHAR(100) UNIQUE NOT NULL,
+      flw_tx_id BIGINT NULL,
+      flw_ref VARCHAR(100) NULL,
+      ngn_amount DECIMAL(12, 2) NOT NULL,
+      usd_equivalent DECIMAL(12, 6) NOT NULL,
+      fx_rate DECIMAL(12, 6) NOT NULL,
+      status ENUM('PENDING_UNSETTLED', 'PAID_SETTLED', 'FAILED', 'CANCELLED') DEFAULT 'PENDING_UNSETTLED',
+      payment_type VARCHAR(50) DEFAULT 'card',
+      currency VARCHAR(5) DEFAULT 'NGN',
+      processor VARCHAR(50) DEFAULT 'flutterwave',
+      customer_name VARCHAR(255) NULL,
+      customer_email VARCHAR(255) NULL,
+      customer_phone VARCHAR(20) NULL,
+      charged_amount DECIMAL(12, 2) NULL,
+      app_fee DECIMAL(12, 6) DEFAULT 0,
+      merchant_fee DECIMAL(12, 6) DEFAULT 0,
+      processor_response JSON NULL,
+      auth_model VARCHAR(50) NULL,
+      settlement_token VARCHAR(255) NULL,
+      account_id INT NULL,
+      narration TEXT NULL,
+      payment_link TEXT NULL,
+      checkout_token VARCHAR(255) NULL,
+      expires_at TIMESTAMP NULL,
+      meta JSON NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      paid_at TIMESTAMP NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_user_id (user_id),
+      INDEX idx_tx_ref (tx_ref),
+      INDEX idx_flw_tx_id (flw_tx_id),
+      INDEX idx_status (status),
+      INDEX idx_created_at (created_at),
+      INDEX idx_user_status (user_id, status),
+      INDEX idx_settlement_pending (status, created_at),
+      INDEX idx_expires_at (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // User demo balances table - FIXED: Better precision
+    `CREATE TABLE IF NOT EXISTS user_demo_balances (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL UNIQUE,
+      balance DECIMAL(12, 6) DEFAULT 0.000000,
+      total_deposited DECIMAL(12, 6) DEFAULT 0.000000,
+      total_spent DECIMAL(12, 6) DEFAULT 0.000000,
+      pending_deposits DECIMAL(12, 6) DEFAULT 0.000000,
+      last_deposit_at TIMESTAMP NULL,
+      last_transaction_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_user_id (user_id),
+      INDEX idx_balance (balance)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Flutterwave webhook logs
+    `CREATE TABLE IF NOT EXISTS flutterwave_webhook_logs (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      event VARCHAR(100) NOT NULL,
+      tx_ref VARCHAR(100) NULL,
+      flw_tx_id BIGINT NULL,
+      signature_header VARCHAR(1024) NULL,
+      signature_valid BOOLEAN DEFAULT FALSE,
+      raw_payload JSON NOT NULL,
+      processed_data JSON NULL,
+      processed BOOLEAN DEFAULT FALSE,
+      processing_error TEXT NULL,
+      processing_time_ms INT NULL,
+      idempotency_key VARCHAR(100) NULL,
+      duplicate_of INT NULL,
+      ip_address VARCHAR(45) NULL,
+      user_agent TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      processed_at TIMESTAMP NULL,
+      INDEX idx_event (event),
+      INDEX idx_tx_ref (tx_ref),
+      INDEX idx_flw_tx_id (flw_tx_id),
+      INDEX idx_processed (processed),
+      INDEX idx_signature_valid (signature_valid),
+      INDEX idx_created_at (created_at),
+      INDEX idx_idempotency (idempotency_key),
+      INDEX idx_ip_address (ip_address),
+      UNIQUE KEY unique_idempotency (idempotency_key, event)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Exchange rates cache
+    `CREATE TABLE IF NOT EXISTS exchange_rates (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      from_currency VARCHAR(5) NOT NULL,
+      to_currency VARCHAR(5) NOT NULL,
+      rate DECIMAL(12, 6) NOT NULL,
+      source VARCHAR(50) DEFAULT 'exchangerate-api.com',
+      bid DECIMAL(12, 6) NULL,
+      ask DECIMAL(12, 6) NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP NOT NULL,
+      UNIQUE KEY unique_currency_pair (from_currency, to_currency),
+      INDEX idx_expires_at (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Deposit attempts tracking
+    `CREATE TABLE IF NOT EXISTS deposit_attempts (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      tx_ref VARCHAR(100) NOT NULL,
+      attempt_number INT DEFAULT 1,
+      ngn_amount DECIMAL(12, 2) NOT NULL,
+      payment_type VARCHAR(50) NOT NULL,
+      status ENUM('INITIATED', 'REDIRECTED', 'COMPLETED', 'FAILED', 'TIMEOUT') DEFAULT 'INITIATED',
+      error_message TEXT NULL,
+      ip_address VARCHAR(45) NULL,
+      user_agent TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP NULL,
+      INDEX idx_user_id (user_id),
+      INDEX idx_tx_ref (tx_ref),
+      INDEX idx_status (status),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // Payment transaction logs (for audit trail)
+    `CREATE TABLE IF NOT EXISTS payment_transaction_logs (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      tx_ref VARCHAR(100) NOT NULL,
+      action VARCHAR(50) NOT NULL,
+      status_before VARCHAR(50) NULL,
+      status_after VARCHAR(50) NULL,
+      amount DECIMAL(12, 6) NULL,
+      metadata JSON NULL,
+      ip_address VARCHAR(45) NULL,
+      user_agent TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_id (user_id),
+      INDEX idx_tx_ref (tx_ref),
+      INDEX idx_action (action),
+      INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+  ];
+
+  for (const sql of tables) {
+    await pool.execute(sql);
+  }
+
+  logger.info('✅ Flutterwave tables created');
+}
+
+async function migrateExistingData(pool) {
+  logger.info('Migrating existing data...');
+
+  // Insert initial exchange rate
+  await pool.execute(`
+    INSERT IGNORE INTO exchange_rates (from_currency, to_currency, rate, expires_at)
+    VALUES ('USD', 'NGN', 1520.00, DATE_ADD(NOW(), INTERVAL 1 HOUR))
+  `);
+
+  // Create demo balance records for existing users
+  await pool.execute(`
+    INSERT IGNORE INTO user_demo_balances (user_id, balance, total_deposited)
+    SELECT 
+      s.user_id,
+      COALESCE(s.balance, 0) / 1520.00 as balance,
+      0
+    FROM sms_user_accounts s
+    WHERE s.user_id NOT IN (SELECT user_id FROM user_demo_balances)
+  `);
+
+  // Update sms_user_accounts with Flutterwave fields
+  const alterQueries = [
+    `ALTER TABLE sms_user_accounts 
+     ADD COLUMN IF NOT EXISTS flw_customer_id VARCHAR(100) NULL AFTER api_key`,
+    `ALTER TABLE sms_user_accounts 
+     ADD COLUMN IF NOT EXISTS preferred_payment_method VARCHAR(50) DEFAULT 'card' AFTER flw_customer_id`,
+    `ALTER TABLE sms_user_accounts 
+     ADD INDEX IF NOT EXISTS idx_flw_customer_id (flw_customer_id)`
+  ];
+
+  for (const query of alterQueries) {
+    try {
+      await pool.execute(query);
+    } catch (error) {
+      if (!error.message.includes('Duplicate')) {
+        logger.warn('Alter table warning:', error.message);
+      }
+    }
+  }
+
+  logger.info('✅ Data migration completed');
+}
+
+async function createMonitoringViews(pool) {
+  logger.info('Creating monitoring views...');
+
+  // Pending settlements monitor
+  await pool.execute(`
+    CREATE OR REPLACE VIEW pending_settlements_monitor AS
+    SELECT 
+      pd.id,
+      pd.user_id,
+      pd.tx_ref,
+      pd.ngn_amount,
+      pd.usd_equivalent,
+      pd.status,
+      pd.created_at,
+      pd.expires_at,
+      TIMESTAMPDIFF(HOUR, pd.created_at, NOW()) as hours_pending,
+      CASE 
+        WHEN pd.expires_at IS NOT NULL AND pd.expires_at < NOW() THEN 'EXPIRED'
+        WHEN TIMESTAMPDIFF(HOUR, pd.created_at, NOW()) > 24 THEN 'STALE'
+        ELSE 'ACTIVE'
+      END as alert_status
+    FROM payment_deposits pd
+    WHERE pd.status = 'PENDING_UNSETTLED'
+    ORDER BY pd.created_at DESC
+  `);
+
+  // Payment system health view
+  await pool.execute(`
+    CREATE OR REPLACE VIEW payment_system_health AS
+    SELECT 
+      'Deposits Today' as metric,
+      COUNT(*) as value,
+      'count' as type
+    FROM payment_deposits 
+    WHERE DATE(created_at) = CURDATE()
+    
+    UNION ALL
+    
+    SELECT 
+      'Successful Today' as metric,
+      COUNT(*) as value,
+      'count' as type
+    FROM payment_deposits 
+    WHERE DATE(created_at) = CURDATE() AND status = 'PAID_SETTLED'
+    
+    UNION ALL
+    
+    SELECT 
+      'Pending Settlements' as metric,
+      COUNT(*) as value,
+      'alert' as type
+    FROM payment_deposits 
+    WHERE status = 'PENDING_UNSETTLED'
+    
+    UNION ALL
+    
+    SELECT 
+      'Old Pending (>24h)' as metric,
+      COUNT(*) as value,
+      'alert' as type
+    FROM payment_deposits 
+    WHERE status = 'PENDING_UNSETTLED' AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+    
+    UNION ALL
+    
+    SELECT 
+      'Webhook Success Rate (24h)' as metric,
+      COALESCE(
+        ROUND(
+          (COUNT(CASE WHEN processed = TRUE THEN 1 END) / NULLIF(COUNT(*), 0)) * 100, 2
+        ), 0
+      ) as value,
+      'percentage' as type
+    FROM flutterwave_webhook_logs 
+    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+  `);
+
+  logger.info('✅ Monitoring views created');
+}
+
+async function setupInitialConfiguration(pool) {
+  logger.info('Setting up initial configuration...');
+
+  // Create configuration table
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS system_config (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      config_key VARCHAR(100) UNIQUE NOT NULL,
+      config_value TEXT NOT NULL,
+      description TEXT,
+      config_type ENUM('string', 'number', 'boolean', 'json') DEFAULT 'string',
+      is_sensitive BOOLEAN DEFAULT FALSE,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_config_key (config_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Insert initial configuration
+  const configs = [
+    ['flutterwave_enabled', 'true', 'Enable Flutterwave payment processing', 'boolean'],
+    ['default_currency', 'NGN', 'Default currency for deposits', 'string'],
+    ['min_deposit_amount', '100', 'Minimum deposit amount in NGN', 'number'],
+    ['max_deposit_amount', '1000000', 'Maximum deposit amount in NGN', 'number'],
+    ['exchange_rate_cache_ttl', '3600', 'Exchange rate cache TTL in seconds', 'number'],
+    ['webhook_retry_attempts', '3', 'Number of webhook retry attempts', 'number'],
+    ['settlement_monitor_enabled', 'true', 'Enable settlement monitoring', 'boolean'],
+    ['payment_timeout_minutes', '15', 'Payment session timeout in minutes', 'number'],
+    ['fx_rate_margin', '0.01', 'FX rate margin percentage (1%)', 'number'],
+    ['migration_completed_at', new Date().toISOString(), 'Migration completion timestamp', 'string']
+  ];
+
+  for (const [key, value, description, type] of configs) {
+    await pool.execute(`
+      INSERT IGNORE INTO system_config (config_key, config_value, description, config_type)
+      VALUES (?, ?, ?, ?)
+    `, [key, value, description, type]);
+  }
+
+  logger.info('✅ Initial configuration set');
+}
+
+// FIXED: Add table repair function for existing installations
+async function repairExistingTables(pool) {
+  logger.info('Repairing existing payment_deposits table...');
+  
+  try {
+    // Check existing columns
+    const [columns] = await pool.execute(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'payment_deposits' 
+      AND TABLE_SCHEMA = DATABASE()
+    `);
+    
+    const existingColumns = columns.map(row => row.COLUMN_NAME);
+    
+    // Add missing columns
+    const missingColumns = [
+      ['payment_link', 'ADD COLUMN payment_link TEXT NULL AFTER narration'],
+      ['checkout_token', 'ADD COLUMN checkout_token VARCHAR(255) NULL AFTER payment_link'],
+      ['expires_at', 'ADD COLUMN expires_at TIMESTAMP NULL AFTER checkout_token'],
+      ['pending_deposits', 'ADD COLUMN pending_deposits DECIMAL(12, 6) DEFAULT 0.000000 AFTER total_spent']
+    ];
+    
+    for (const [columnName, alterQuery] of missingColumns) {
+      if (!existingColumns.includes(columnName)) {
+        await pool.execute(`ALTER TABLE payment_deposits ${alterQuery}`);
+        logger.info(`Added missing column: ${columnName}`);
+      }
+    }
+    
+    // Add missing indexes
+    const indexQueries = [
+      'ALTER TABLE payment_deposits ADD INDEX IF NOT EXISTS idx_expires_at (expires_at)'
+    ];
+    
+    for (const indexQuery of indexQueries) {
+      try {
+        await pool.execute(indexQuery);
+      } catch (error) {
+        if (!error.message.includes('Duplicate')) {
+          logger.warn('Index creation warning:', error.message);
+        }
+      }
+    }
+    
+    // Also repair user_demo_balances if needed
+    const [userBalanceColumns] = await pool.execute(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'user_demo_balances' 
+      AND TABLE_SCHEMA = DATABASE()
+    `);
+    
+    const userBalanceExisting = userBalanceColumns.map(row => row.COLUMN_NAME);
+    
+    if (!userBalanceExisting.includes('pending_deposits')) {
+      await pool.execute(`
+        ALTER TABLE user_demo_balances 
+        ADD COLUMN pending_deposits DECIMAL(12, 6) DEFAULT 0.000000 AFTER total_spent
+      `);
+      logger.info('Added pending_deposits column to user_demo_balances');
+    }
+    
+    logger.info('✅ Table repair completed');
+    
+  } catch (error) {
+    logger.error('Table repair error:', error);
+    // Don't throw - let migration continue
+  }
+}
+
+// Health check function
+async function getSystemHealth() {
   const pool = getPool();
   
   try {
-    // Recent webhook activity
-    const [webhookStats] = await pool.execute(`
-      SELECT 
-        COUNT(*) as total_webhooks,
-        COUNT(CASE WHEN processed = TRUE THEN 1 END) as processed_webhooks,
-        COUNT(CASE WHEN event_type = 'SUCCESSFUL_TRANSACTION' THEN 1 END) as payment_webhooks,
-        COUNT(CASE WHEN event_type = 'SETTLEMENT_COMPLETED' THEN 1 END) as settlement_webhooks
-      FROM webhook_logs 
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-    `);
-
-    // Payment processing stats
-    const [paymentStats] = await pool.execute(`
-      SELECT 
-        COUNT(*) as total_payments,
-        COUNT(CASE WHEN status = 'PAID' THEN 1 END) as successful_payments,
-        COUNT(CASE WHEN status = 'PENDING' THEN 1 END) as pending_payments,
-        COUNT(CASE WHEN settlement_status = 'PENDING' THEN 1 END) as pending_settlements,
-        SUM(CASE WHEN status = 'PAID' THEN amount_paid ELSE 0 END) as total_processed
-      FROM payment_transactions 
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-    `);
-
-    // Orphan payments count
-    const [orphanStats] = await pool.execute(`
-      SELECT COUNT(*) as orphan_count
-      FROM orphan_payments 
-      WHERE reconciled = FALSE
-    `);
-
+    const [health] = await pool.execute('SELECT * FROM payment_system_health');
+    const [pending] = await pool.execute('SELECT COUNT(*) as count FROM pending_settlements_monitor');
+    
     return {
-      webhook_activity: webhookStats[0],
-      payment_activity: paymentStats[0],
-      orphan_payments: orphanStats[0].orphan_count,
+      metrics: health,
+      pendingSettlements: pending[0].count,
       timestamp: new Date().toISOString()
     };
-
   } catch (error) {
-    logger.error('Failed to get payment system health:', error);
+    logger.error('Health check failed:', error);
     return {
-      webhook_activity: { total_webhooks: 0, processed_webhooks: 0 },
-      payment_activity: { total_payments: 0, successful_payments: 0 },
-      orphan_payments: 0,
       error: error.message,
       timestamp: new Date().toISOString()
     };
   }
 }
 
+// Cleanup old data
+async function cleanupOldData(daysOld = 90) {
+  const pool = getPool();
+  
+  try {
+    logger.info(`Cleaning up data older than ${daysOld} days...`);
+    
+    // Archive old webhook logs
+    const [result] = await pool.execute(`
+      DELETE FROM flutterwave_webhook_logs 
+      WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) 
+      AND processed = TRUE
+    `, [daysOld]);
+    
+    logger.info(`Cleaned up ${result.affectedRows} old webhook logs`);
+    
+    return { success: true, cleanedRecords: result.affectedRows };
+  } catch (error) {
+    logger.error('Cleanup failed:', error);
+    throw error;
+  }
+}
+
+// Helper function to validate user exists before payment operations
+async function validateUserExists(userId) {
+  const { getExistingDbPool } = require('../Config/database');
+  const existingPool = getExistingDbPool();
+  
+  try {
+    const [rows] = await existingPool.execute(
+      'SELECT id FROM users WHERE id = ?',
+      [userId]
+    );
+    return rows.length > 0;
+  } catch (error) {
+    logger.error('User validation error:', error);
+    return false;
+  }
+}
+
 module.exports = {
-  createEnhancedPaymentTables,
-  migrateExistingPaymentData,
-  maintainPaymentTables,
-  getPaymentSystemHealth
+  runFlutterwaveMigration,
+  repairExistingTables,
+  getSystemHealth,
+  cleanupOldData,
+  validateUserExists
 };

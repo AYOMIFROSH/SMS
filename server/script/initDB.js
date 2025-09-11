@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { setupDatabase, initializeTables } = require('../Config/database');
-const { createEnhancedPaymentTables, migrateExistingPaymentData, maintainPaymentTables, getPaymentSystemHealth} = require('../migration/migrateToSimplified')
+const { testDatabaseSetup} = require('./test-db-setup')
+const { runFlutterwaveMigration, getSystemHealth, cleanupOldData } = require('../migration/migrateToSimplified');
 const logger = require('../utils/logger');
 
 async function initializeDatabase() {
@@ -13,15 +14,25 @@ async function initializeDatabase() {
     await initializeTables();
     console.log('✅ All tables created successfully');
 
-    await createEnhancedPaymentTables();
+    await testDatabaseSetup();
+    console.log('✅ Flutterwave migration completed');
 
-    await migrateExistingPaymentData();
+    await cleanupOldData();
+    console.log('✅ Old data cleanup completed');
 
-    await maintainPaymentTables();
+    // Get system health check (optional)
+    const health = await getSystemHealth();
+    console.log('✅ System health check completed');
+    
+    // Optional: Log health metrics
+    if (health.metrics) {
+      console.log('📊 System Health Metrics:');
+      health.metrics.forEach(metric => {
+        console.log(`   ${metric.metric}: ${metric.value} (${metric.type})`);
+      });
+    }
 
-    await getPaymentSystemHealth();
-
-    console.log('🎉 Database initialization completed!');
+    console.log('🎉 Database initialization completed successfully!');
     process.exit(0);
   } catch (error) {
     console.error('❌ Database initialization failed:', error);

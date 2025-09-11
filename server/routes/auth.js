@@ -146,6 +146,7 @@ const clearAuthCookies = (res, req) => {
 
 // POST /api/auth/login
 router.post('/login', authLimiter, loginValidation, async (req, res) => {
+        console.log("DEBUG login body:", req.body);
   try {
     // Check validation errors
     const errors = validationResult(req);
