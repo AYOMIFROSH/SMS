@@ -1,4 +1,4 @@
-// src/hooks/usePayment.ts - Fixed React hook for payment management
+// src/hooks/usePayment.ts - Minor optimizations for WebSocket config usage
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { paymentAPI, type PaymentDeposit, type UserBalance, type PaymentSummary } from '@/api/payments';
 import { useAppSelector } from '@/store/hook';
@@ -40,6 +40,12 @@ interface UsePaymentOptions {
   autoFetch?: boolean;
   autoRefresh?: number; // Auto refresh interval in ms
   enableWebSocket?: boolean;
+  webSocketConfig?: {
+    maxReconnectAttempts?: number;
+    reconnectInterval?: number;
+    heartbeatInterval?: number;
+    enableMetrics?: boolean;
+  };
 }
 
 interface UsePaymentReturn extends PaymentState {
@@ -96,7 +102,8 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
   const {
     autoFetch = false,
     autoRefresh = 0,
-    enableWebSocket = true
+    enableWebSocket = true,
+    webSocketConfig = {} // Optional WebSocket configuration
   } = options;
 
   // map API pagination (whatever the API returns) to internal PaginationInfo
@@ -108,7 +115,6 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
     hasNext: p.has_next ?? p.hasNext ?? false,
     hasPrevious: p.has_previous ?? p.hasPrevious ?? false
   });
-
 
   const { isAuthenticated, user } = useAppSelector(state => state.auth);
   const [state, setState] = useState<PaymentState>(INITIAL_STATE);
@@ -202,7 +208,19 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
   const refreshTransactions = useCallback(() => loadTransactions(), [loadTransactions]);
   const refreshSummary = useCallback(() => loadBalance(), [loadBalance]); // Summary is part of balance response
 
-  // WebSocket for real-time updates - FIXED: Now declared after refresh functions
+  // Optimized WebSocket configuration for payment-specific needs
+  const paymentWebSocketConfig = useMemo(() => ({
+    maxReconnectAttempts: 8, // More attempts for payment reliability
+    reconnectInterval: 2000, // Faster reconnection for payments
+    heartbeatInterval: 25000, // More frequent heartbeat
+    enableMessageQueue: true, // Important for payment messages
+    enableDeduplication: true, // Prevent duplicate payment notifications
+    enableMetrics: true,
+    messageCleanupInterval: 120000, // 2 minutes - faster cleanup for payments
+    ...webSocketConfig // Allow user overrides
+  }), [webSocketConfig]);
+
+  // WebSocket for real-time updates with payment-optimized config
   useWebSocket(
     useCallback((message: any) => {
       if (!enableWebSocket || !user) return;
@@ -260,9 +278,31 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
             refreshTransactions();
           }
           break;
+
+        // Handle payment verification status updates
+        case 'payment_verification_started':
+          if (message.data.userId === user.id && message.data.txRef) {
+            console.log('Payment verification started:', message.data.txRef);
+            setRetryingPayments(prev => [...prev, message.data.txRef]);
+          }
+          break;
+
+        case 'payment_verification_completed':
+          if (message.data.userId === user.id && message.data.txRef) {
+            console.log('Payment verification completed:', message.data.txRef);
+            setRetryingPayments(prev => prev.filter(ref => ref !== message.data.txRef));
+            
+            if (message.data.success) {
+              setPendingTransactions(prev => prev.filter(ref => ref !== message.data.txRef));
+              refreshBalance();
+              refreshTransactions();
+            }
+          }
+          break;
       }
     }, [enableWebSocket, user, refreshBalance, refreshTransactions, refreshSummary]),
-    enableWebSocket && isAuthenticated
+    enableWebSocket && isAuthenticated,
+    paymentWebSocketConfig // Use optimized config
   );
 
   // Create deposit
@@ -520,10 +560,23 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
   ]);
 };
 
-// Separate hook for WebSocket payment notifications
-export const usePaymentWebSocket = (options: { enabled?: boolean } = {}) => {
-  const { enabled = true } = options;
+// Separate hook for WebSocket payment notifications with config support
+export const usePaymentWebSocket = (options: { 
+  enabled?: boolean;
+  webSocketConfig?: any;
+} = {}) => {
+  const { enabled = true, webSocketConfig = {} } = options;
   const { user } = useAppSelector(state => state.auth);
+
+  // Payment-specific WebSocket config
+  const paymentConfig = useMemo(() => ({
+    maxReconnectAttempts: 8,
+    reconnectInterval: 2000,
+    enableMessageQueue: true,
+    enableDeduplication: true,
+    messageCleanupInterval: 120000,
+    ...webSocketConfig
+  }), [webSocketConfig]);
 
   return useWebSocket(
     useCallback((message: any) => {
@@ -542,7 +595,8 @@ export const usePaymentWebSocket = (options: { enabled?: boolean } = {}) => {
           break;
       }
     }, [enabled, user]),
-    enabled
+    enabled,
+    paymentConfig
   );
 };
 
