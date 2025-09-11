@@ -216,7 +216,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
       return res.status(401).json({
         success: false,
         error: 'Invalid username or password',
-        code: 'INVALID_CREDENTIALS'
+        code: 'ACCOUNT_NOT_FOUND'
       });
     }
 
@@ -244,7 +244,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
       return res.status(401).json({
         success: false,
         error: 'Invalid username or password',
-        code: 'INVALID_CREDENTIALS'
+        code: 'INVALID_PASSWORD'
       });
     }
 
