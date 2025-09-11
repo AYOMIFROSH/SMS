@@ -1,4 +1,4 @@
-// src/components/services/PriceDisplay.tsx - Mobile Responsive Version
+// src/components/services/PriceDisplay.tsx - Updated with real-time balance integration
 import React, { useState } from 'react';
 import { DollarSign, AlertCircle, CheckCircle, Info, CreditCard, Shield, Clock, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -9,13 +9,15 @@ interface PriceDisplayProps {
   balance: number;
   canAfford: boolean;
   loading?: boolean;
+  balanceLoading?: boolean;
 }
 
 const PriceDisplay: React.FC<PriceDisplayProps> = ({ 
   price, 
   balance, 
   canAfford, 
-  loading = false 
+  loading = false,
+  balanceLoading = false 
 }) => {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showPaymentInfo, setShowPaymentInfo] = useState(false);
@@ -75,7 +77,12 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
           </div>
 
           <div className="flex items-center justify-between text-sm mb-3">
-            <span className="text-gray-600">Your Balance</span>
+            <span className="text-gray-600 flex items-center">
+              Your Balance
+              {balanceLoading && (
+                <div className="ml-2 w-3 h-3 border border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+              )}
+            </span>
             <span className={`font-medium ${canAfford ? 'text-green-600' : 'text-red-600'}`}>
               ${balance.toFixed(4)}
             </span>
@@ -167,7 +174,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
         </div>
       )}
 
-      {/* Balance Status */}
+      {/* Balance Status - Enhanced with real-time indicators */}
       <div className={`rounded-lg p-4 ${
         canAfford 
           ? 'bg-green-50 border border-green-200' 
@@ -180,10 +187,13 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
             <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
           )}
           <div className="flex-1">
-            <h4 className={`text-sm font-medium ${
+            <h4 className={`text-sm font-medium flex items-center ${
               canAfford ? 'text-green-800' : 'text-red-800'
             }`}>
               {canAfford ? 'Sufficient Balance' : 'Insufficient Balance'}
+              {balanceLoading && (
+                <div className="ml-2 w-3 h-3 border border-current border-t-transparent rounded-full animate-spin opacity-60"></div>
+              )}
             </h4>
             
             {/* Desktop Balance Info */}
@@ -197,6 +207,9 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
                   : ` Additional needed: $${Math.abs(remainingBalance).toFixed(4)}`
                 }
               </p>
+              {balanceLoading && (
+                <p className="text-xs text-gray-500 mt-1">Balance updating...</p>
+              )}
             </div>
 
             {/* Mobile Balance Info */}
@@ -217,14 +230,20 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
                   </span>
                 </div>
               )}
+              {balanceLoading && (
+                <div className="text-xs text-gray-500">Balance updating...</div>
+              )}
             </div>
 
             {/* Top-up suggestion for insufficient balance */}
             {!canAfford && (
               <div className="mt-3 pt-3 border-t border-red-200">
-                <button  className="text-sm font-medium text-red-700 hover:text-red-800 transition-colors underline">
-                  <Link to='/transactions'>Top up your account</Link>
-                </button>
+                <Link 
+                  to="/transactions" 
+                  className="text-sm font-medium text-red-700 hover:text-red-800 transition-colors underline"
+                >
+                  Top up your account
+                </Link>
               </div>
             )}
           </div>

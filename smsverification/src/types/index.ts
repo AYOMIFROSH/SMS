@@ -132,14 +132,15 @@ export interface PriceInfo {
   available: boolean;
 }
 
-export interface ApiResponse<T> {
+export interface ApiResponse<T = any> {
   success: boolean;
-  data: T;
+  data?: T;            // <-- made optional
   message?: string;
   error?: string;
   code?: string;
   requestId?: string;
 }
+
 
 export interface PaginatedResponse<T> {
   data: T[];

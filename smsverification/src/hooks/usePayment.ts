@@ -1,470 +1,549 @@
-// src/hooks/usePayment.ts - FIXED to trust backend webhooks and handle popup properly
-import { useCallback, useEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store/hook';
-import {
-    fetchBalance,
-    fetchTransactions,
-    createDeposit,
-    verifyPayment,
-    clearError,
-    setFilters,
-    clearFilters,
-    updateTransactionStatus,
-    removeActiveDeposit,
-    updateBalance,
-    updateSettlementStatus,
-    selectPaymentBalance,
-    selectPaymentTransactions,
-    selectPaymentLoading,
-    selectPaymentError,
-    selectPaymentPagination,
-    selectPaymentSummary,
-    selectPaymentFilters,
-    selectActiveDeposits,
-} from '@/store/slices/paymentSlice';
-import { paymentApi, DepositRequest } from '@/api/payments';
-import useWebSocket from '@/hooks/useWebsocket';
+// src/hooks/usePayment.ts - Fixed React hook for payment management
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { paymentAPI, type PaymentDeposit, type UserBalance, type PaymentSummary } from '@/api/payments';
+import { useAppSelector } from '@/store/hook';
+import type { ApiResponse } from '@/types/index';
+import useWebSocket from './useWebsocket';
 import toast from 'react-hot-toast';
-import { toastInfo } from "@/utils/toastHelpers";
 
-interface UsePaymentOptions {
-    autoFetch?: boolean;
-    enableWebSocketUpdates?: boolean;
+interface PaymentFilters {
+  status?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
-export const usePayment = (options: UsePaymentOptions = {}) => {
-    const { autoFetch = false, enableWebSocketUpdates = true } = options;
+interface PaginationInfo {
+  page: number;
+  limit: number;
+  totalRecords: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+}
 
-    const dispatch = useAppDispatch();
+interface PaymentState {
+  balance: UserBalance | null;
+  transactions: PaymentDeposit[];
+  loading: {
+    balance: boolean;
+    transactions: boolean;
+    creating: boolean;
+    verifying: string[]; // tx_refs being verified
+  };
+  error: string | null;
+  pagination: PaginationInfo;
+  summary: PaymentSummary;
+  filters: PaymentFilters;
+}
 
-    // Selectors
-    const balance = useAppSelector(selectPaymentBalance);
-    const transactions = useAppSelector(selectPaymentTransactions);
-    const loading = useAppSelector(selectPaymentLoading);
-    const error = useAppSelector(selectPaymentError);
-    const pagination = useAppSelector(selectPaymentPagination);
-    const summary = useAppSelector(selectPaymentSummary);
-    const filters = useAppSelector(selectPaymentFilters);
-    const activeDeposits = useAppSelector(selectActiveDeposits);
+interface UsePaymentOptions {
+  autoFetch?: boolean;
+  autoRefresh?: number; // Auto refresh interval in ms
+  enableWebSocket?: boolean;
+}
 
-    // WebSocket for real-time updates
-    const { sendMessage } = useWebSocket(
-        enableWebSocketUpdates ? handleWebSocketMessage : undefined,
-        enableWebSocketUpdates
-    );
+interface UsePaymentReturn extends PaymentState {
+  // Actions
+  createDeposit: (request: any) => Promise<ApiResponse<any>>;
+  loadTransactions: (params?: any) => Promise<void>;
+  refreshBalance: () => Promise<void>;
+  refreshTransactions: () => Promise<void>;
+  refreshSummary: () => Promise<void>;
+  verifyPayment: (txRef: string) => Promise<ApiResponse<any>>;
+  cancelPayment: (txRef: string) => Promise<ApiResponse<any>>;
+  manualVerifyTransaction: (txRef: string) => Promise<void>;
+  updateFilters: (newFilters: Partial<PaymentFilters>) => void;
 
-    // FIXED: Enhanced WebSocket message handler
-    function handleWebSocketMessage(message: any) {
-        switch (message.type) {
-            case 'payment_successful':
-                handlePaymentSuccess(message.data);
-                break;
+  // Utilities
+  formatAmount: (amount: number, currency?: 'USD' | 'NGN') => string;
+  getStatusDisplay: (status: string) => any;
+  getPaymentMethodName: (method: string) => string;
 
-            case 'payment_failed':
-                handlePaymentFailed(message.data);
-                break;
+  // WebSocket integration
+  pendingTransactions: string[];
+  retryingPayments: string[];
+}
 
-            case 'payment_reversed':
-                handlePaymentReversed(message.data);
-                break;
+const INITIAL_STATE: PaymentState = {
+  balance: null,
+  transactions: [],
+  loading: {
+    balance: false,
+    transactions: false,
+    creating: false,
+    verifying: []
+  },
+  error: null,
+  pagination: {
+    page: 1,
+    limit: 20,
+    totalRecords: 0,
+    totalPages: 0,
+    hasNext: false,
+    hasPrevious: false
+  },
+  summary: {
+    total_payments: 0,
+    successful_payments: 0,
+    pending_payments: 0,
+    pending_amount: 0,
+    success_rate: 0
+  },
+  filters: {}
+};
 
-            case 'settlement_completed':
-                handleSettlementCompleted(message.data);
-                break;
+export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn => {
+  const {
+    autoFetch = false,
+    autoRefresh = 0,
+    enableWebSocket = true
+  } = options;
 
-            case 'settlement_failed':
-                handleSettlementFailed(message.data);
-                break;
+  // map API pagination (whatever the API returns) to internal PaginationInfo
+  const mapApiPaginationToPaginationInfo = (p: any): PaginationInfo => ({
+    page: p.page ?? 1,
+    limit: p.limit ?? 20,
+    totalRecords: p.total_records ?? p.total ?? p.totalRecords ?? 0,
+    totalPages: p.total_pages ?? p.totalPages ?? 0,
+    hasNext: p.has_next ?? p.hasNext ?? false,
+    hasPrevious: p.has_previous ?? p.hasPrevious ?? false
+  });
 
-            case 'balance_updated':
-                handleBalanceUpdated(message.data);
-                break;
 
-            default:
-                // Let other handlers manage non-payment messages
-                break;
-        }
+  const { isAuthenticated, user } = useAppSelector(state => state.auth);
+  const [state, setState] = useState<PaymentState>(INITIAL_STATE);
+
+  // Track pending and retrying payments
+  const [pendingTransactions, setPendingTransactions] = useState<string[]>([]);
+  const [retryingPayments, setRetryingPayments] = useState<string[]>([]);
+
+  // Update loading state helper
+  const updateLoading = useCallback((key: keyof PaymentState['loading'], value: boolean | string[]) => {
+    setState(prev => ({
+      ...prev,
+      loading: {
+        ...prev.loading,
+        [key]: value
+      }
+    }));
+  }, []);
+
+  // Set error helper
+  const setError = useCallback((error: string | null) => {
+    setState(prev => ({ ...prev, error }));
+  }, []);
+
+  // Load user balance
+  const loadBalance = useCallback(async () => {
+    if (!isAuthenticated) return;
+
+    try {
+      updateLoading('balance', true);
+      setError(null);
+
+      const response = await paymentAPI.getBalance();
+
+      setState(prev => ({
+        ...prev,
+        balance: response.data.balance,
+        summary: response.data.summary,
+        error: null
+      }));
+
+    } catch (error: any) {
+      console.error('Load balance error:', error);
+      setError('Failed to load balance');
+    } finally {
+      updateLoading('balance', false);
     }
+  }, [isAuthenticated, updateLoading, setError]);
 
-    // FIXED: WebSocket event handlers - minimal refresh calls
-    const handlePaymentSuccess = useCallback((data: any) => {
-        dispatch(updateTransactionStatus({
-            reference: data.paymentReference,
-            status: 'PAID',
-            paidAt: data.timestamp,
-            settlementStatus: data.settlementStatus || 'PENDING'
-        }));
+  // Load transactions
+  const loadTransactions = useCallback(async (params: any = {}) => {
+    if (!isAuthenticated) return;
 
-        dispatch(updateBalance({
-            balance: data.newBalance,
-            change: data.amount
-        }));
+    try {
+      updateLoading('transactions', true);
+      setError(null);
 
-        dispatch(removeActiveDeposit(data.paymentReference));
+      const requestParams = {
+        page: state.pagination.page,
+        limit: state.pagination.limit,
+        ...state.filters,
+        ...params
+      };
 
-        toast.success(
-            `Payment successful! ${formatAmount(data.amount)} added to your account.`,
-            { duration: 6000 }
-        );
+      const response = await paymentAPI.getDeposits(requestParams);
+      const mappedPagination = mapApiPaginationToPaginationInfo(response.data.pagination);
 
-        // FIXED: No automatic refresh - Redux state is already updated from webhook data
-        // Only refresh if user manually requests it or if there's a specific need
-    }, [dispatch]);
+      setState(prev => ({
+        ...prev,
+        transactions: response.data.deposits,
+        pagination: mappedPagination,
+        error: null
+      }));
 
-    const handlePaymentFailed = useCallback((data: any) => {
-        dispatch(updateTransactionStatus({
-            reference: data.paymentReference,
-            status: 'FAILED',
-            failureReason: data.reason
-        }));
+      // Update pending transactions list
+      const pending = response.data.deposits
+        .filter(t => t.status === 'PENDING_UNSETTLED')
+        .map(t => t.tx_ref);
+      setPendingTransactions(pending);
 
-        dispatch(removeActiveDeposit(data.paymentReference));
+    } catch (error: any) {
+      console.error('Load transactions error:', error);
+      setError('Failed to load transactions');
+    } finally {
+      updateLoading('transactions', false);
+    }
+  }, [isAuthenticated, state.pagination.page, state.pagination.limit, state.filters, updateLoading, setError]);
 
-        toast.error(
-            `Payment failed: ${data.reason || 'Unknown error'}`,
-            { duration: 8000 }
-        );
-    }, [dispatch]);
+  // Refresh functions - FIXED: Now declared after loadBalance and loadTransactions
+  const refreshBalance = useCallback(() => loadBalance(), [loadBalance]);
+  const refreshTransactions = useCallback(() => loadTransactions(), [loadTransactions]);
+  const refreshSummary = useCallback(() => loadBalance(), [loadBalance]); // Summary is part of balance response
 
-    const handlePaymentReversed = useCallback((data: any) => {
-        dispatch(updateTransactionStatus({
-            reference: data.transactionReference,
-            status: 'REVERSED'
-        }));
+  // WebSocket for real-time updates - FIXED: Now declared after refresh functions
+  useWebSocket(
+    useCallback((message: any) => {
+      if (!enableWebSocket || !user) return;
 
-        dispatch(updateBalance({
-            balance: data.newBalance,
-            change: -data.reversalAmount
-        }));
+      switch (message.type) {
+        case 'payment_successful':
+          if (message.data.userId === user.id) {
+            console.log('Payment successful via WebSocket:', message.data);
+            toast.success(`Payment successful! ${paymentAPI.formatAmount(message.data.settlementAmount)} credited to your account`);
 
-        toast.error(
-            `Payment reversed: ${formatAmount(data.reversalAmount)}. New balance: ${formatAmount(data.newBalance)}`,
-            { duration: 8000 }
-        );
+            // Remove from pending list
+            setPendingTransactions(prev => prev.filter(ref => ref !== message.data.transactionReference));
 
-        // FIXED: No automatic refresh - Redux state updated from webhook
-    }, [dispatch]);
+            // Refresh data
+            refreshBalance();
+            refreshTransactions();
+            refreshSummary();
+          }
+          break;
 
-    // FIXED: Handle settlement completion notifications
-    const handleSettlementCompleted = useCallback((data: any) => {
-        dispatch(updateSettlementStatus({
-            settlementReference: data.settlementReference,
-            status: 'COMPLETED',
-            settlementDate: data.settlementDate
-        }));
+        case 'payment_failed':
+          if (message.data.userId === user.id) {
+            console.log('Payment failed via WebSocket:', message.data);
+            toast.error(`Payment failed: ${message.data.reason}`);
 
-        toast(
-            `Settlement completed: ${formatAmount(data.settlementAmount)} for ${data.transactionCount} transactions`,
-            { duration: 5000 }
-        );
+            // Remove from pending list
+            setPendingTransactions(prev => prev.filter(ref => ref !== message.data.transactionReference));
 
-        // FIXED: No automatic refresh - Redux state updated
-    }, [dispatch]);
+            // Refresh transactions
+            refreshTransactions();
+          }
+          break;
 
-    const handleSettlementFailed = useCallback((data: any) => {
-        dispatch(updateSettlementStatus({
-            settlementReference: data.settlementReference,
-            status: 'FAILED',
-            failureReason: data.failureReason
-        }));
+        case 'balance_updated':
+          if (message.data.userId === user.id) {
+            console.log('Balance updated via WebSocket:', message.data);
 
-        toast.error(
-            `Settlement failed: ${data.failureReason}`,
-            { duration: 6000 }
-        );
+            // Update balance in state
+            setState(prev => ({
+              ...prev,
+              balance: prev.balance ? {
+                ...prev.balance,
+                balance: message.data.balance,
+                formatted_balance: paymentAPI.formatAmount(message.data.balance)
+              } : null
+            }));
+          }
+          break;
 
-        // FIXED: No automatic refresh
-    }, [dispatch]);
+        case 'settlement_completed':
+          if (message.data.userId === user.id) {
+            console.log('Settlement completed via WebSocket:', message.data);
+            toast.success('Payment settlement completed!');
+            refreshBalance();
+            refreshTransactions();
+          }
+          break;
+      }
+    }, [enableWebSocket, user, refreshBalance, refreshTransactions, refreshSummary]),
+    enableWebSocket && isAuthenticated
+  );
 
-    const handleBalanceUpdated = useCallback((data: any) => {
-        dispatch(updateBalance({
-            balance: data.balance,
-            change: data.change || 0
-        }));
+  // Create deposit
+  const createDeposit = useCallback(async (request: any) => {
+    try {
+      updateLoading('creating', true);
+      setError(null);
 
-        if (data.change > 0) {
-            toast.success(`Balance updated: +${formatAmount(data.change)}`);
+      const response = await paymentAPI.createDeposit(request);
+
+      // Add to pending transactions
+      setPendingTransactions(prev => [...prev, response.data.tx_ref]);
+
+      // Refresh transactions to show the new pending deposit
+      setTimeout(() => {
+        refreshTransactions();
+      }, 1000);
+
+      return response;
+
+    } catch (error: any) {
+      console.error('Create deposit error:', error);
+      setError('Failed to create deposit');
+      throw error;
+    } finally {
+      updateLoading('creating', false);
+    }
+  }, [updateLoading, setError, refreshTransactions]);
+
+  // Verify payment
+  const verifyPayment = useCallback(async (txRef: string) => {
+    try {
+      // Add to retrying list
+      setRetryingPayments(prev => [...prev, txRef]);
+
+      const response = await paymentAPI.verifyPayment(txRef);
+
+      // Remove from pending if successful
+      if (response.success) {
+        setPendingTransactions(prev => prev.filter(ref => ref !== txRef));
+
+        // Refresh data
+        refreshBalance();
+        refreshTransactions();
+      }
+
+      return response;
+
+    } catch (error: any) {
+      console.error('Verify payment error:', error);
+      throw error;
+    } finally {
+      // Remove from retrying list
+      setRetryingPayments(prev => prev.filter(ref => ref !== txRef));
+    }
+  }, [refreshBalance, refreshTransactions]);
+
+  // Manual verification (with loading state in main loading object)
+  const manualVerifyTransaction = useCallback(async (txRef: string) => {
+    try {
+      const currentVerifying = state.loading.verifying;
+      updateLoading('verifying', [...currentVerifying, txRef]);
+
+      await verifyPayment(txRef);
+
+    } catch (error) {
+      throw error;
+    } finally {
+      const currentVerifying = state.loading.verifying;
+      updateLoading('verifying', currentVerifying.filter(ref => ref !== txRef));
+    }
+  }, [state.loading.verifying, updateLoading, verifyPayment]);
+
+  // Cancel payment
+  const cancelPayment = useCallback(async (txRef: string) => {
+    try {
+      const response = await paymentAPI.cancelPayment(txRef);
+
+      // Remove from pending list
+      setPendingTransactions(prev => prev.filter(ref => ref !== txRef));
+
+      // Refresh transactions
+      refreshTransactions();
+
+      return response;
+
+    } catch (error: any) {
+      console.error('Cancel payment error:', error);
+      throw error;
+    }
+  }, [refreshTransactions]);
+
+  // Update filters
+  const updateFilters = useCallback((newFilters: Partial<PaymentFilters>) => {
+    setState(prev => ({
+      ...prev,
+      filters: { ...prev.filters, ...newFilters },
+      pagination: { ...prev.pagination, page: 1 } // Reset to first page
+    }));
+  }, []);
+
+  // Utility functions
+  const formatAmount = useCallback((amount: number, currency: 'USD' | 'NGN' = 'USD') => {
+    return paymentAPI.formatAmount(amount, currency);
+  }, []);
+
+  const getStatusDisplay = useCallback((status: string) => {
+    return paymentAPI.getStatusDisplay(status);
+  }, []);
+
+  const getPaymentMethodName = useCallback((method: string) => {
+    return paymentAPI.getPaymentMethodName(method);
+  }, []);
+
+  // Auto fetch on mount
+  useEffect(() => {
+    if (autoFetch && isAuthenticated) {
+      loadBalance();
+      loadTransactions();
+    }
+  }, [autoFetch, isAuthenticated, loadBalance, loadTransactions]);
+
+  // Auto refresh interval
+  useEffect(() => {
+    if (!autoRefresh || !isAuthenticated) return;
+
+    const interval = setInterval(() => {
+      loadBalance();
+      loadTransactions();
+    }, autoRefresh);
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, isAuthenticated, loadBalance, loadTransactions]);
+
+  // Handle payment redirects on mount
+  useEffect(() => {
+    const handleRedirect = async () => {
+      try {
+        const result = await paymentAPI.handlePaymentRedirect();
+        if (result.handled) {
+          // Refresh data after handling redirect
+          setTimeout(() => {
+            refreshBalance();
+            refreshTransactions();
+          }, 1000);
         }
-    }, [dispatch]);
+      } catch (error) {
+        console.error('Error handling payment redirect:', error);
+      }
+    };
+
+    if (isAuthenticated) {
+      handleRedirect();
+    }
+  }, [isAuthenticated, refreshBalance, refreshTransactions]);
+
+  // Listen for custom payment events
+  useEffect(() => {
+    const handlePaymentCompleted = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.txRef) {
+        // Remove from pending list
+        setPendingTransactions(prev => prev.filter(ref => ref !== detail.txRef));
+
+        // Refresh data
+        refreshBalance();
+        refreshTransactions();
+      }
+    };
+
+    const handlePaymentFailed = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.txRef) {
+        // Remove from pending list
+        setPendingTransactions(prev => prev.filter(ref => ref !== detail.txRef));
+
+        // Refresh transactions
+        refreshTransactions();
+      }
+    };
+
+    const handlePaymentCancelled = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.txRef) {
+        // Remove from pending list
+        setPendingTransactions(prev => prev.filter(ref => ref !== detail.txRef));
+
+        // Refresh transactions
+        refreshTransactions();
+      }
+    };
+
+    const handlePaymentWindowClosed = () => {
+      // Optionally refresh data when payment window is closed
+      setTimeout(() => {
+        if (pendingTransactions.length > 0) {
+          refreshTransactions();
+        }
+      }, 2000);
+    };
+
+    window.addEventListener('payment:completed', handlePaymentCompleted);
+    window.addEventListener('payment:failed', handlePaymentFailed);
+    window.addEventListener('payment:cancelled', handlePaymentCancelled);
+    window.addEventListener('payment:windowClosed', handlePaymentWindowClosed);
+
+    return () => {
+      window.removeEventListener('payment:completed', handlePaymentCompleted);
+      window.removeEventListener('payment:failed', handlePaymentFailed);
+      window.removeEventListener('payment:cancelled', handlePaymentCancelled);
+      window.removeEventListener('payment:windowClosed', handlePaymentWindowClosed);
+    };
+  }, [refreshBalance, refreshTransactions, pendingTransactions.length]);
+
+  // Memoized return object
+  return useMemo(() => ({
+    // State
+    ...state,
 
     // Actions
-    const loadBalance = useCallback(async () => {
-        try {
-            await dispatch(fetchBalance()).unwrap();
-        } catch (error) {
-            // Error is handled in Redux
-        }
-    }, [dispatch]);
+    createDeposit,
+    loadTransactions,
+    refreshBalance,
+    refreshTransactions,
+    refreshSummary,
+    verifyPayment,
+    cancelPayment,
+    manualVerifyTransaction,
+    updateFilters,
 
-    const loadTransactions = useCallback(async (params?: {
-        page?: number;
-        limit?: number;
-        status?: string;
-        startDate?: string;
-        endDate?: string;
-    }) => {
-        try {
-            await dispatch(fetchTransactions(params || {})).unwrap();
-        } catch (error) {
-            // Error is handled in Redux
-        }
-    }, [dispatch]);
+    // Utilities
+    formatAmount,
+    getStatusDisplay,
+    getPaymentMethodName,
 
-    // FIXED: Enhanced deposit initiation with proper popup handling and redirect
-    const initiateDeposit = useCallback(async (depositData: DepositRequest) => {
-        try {
-            const result = await dispatch(createDeposit(depositData)).unwrap();
-
-            // Subscribe to payment updates via WebSocket
-            if (enableWebSocketUpdates && sendMessage) {
-                sendMessage({
-                    type: 'subscribe_payment',
-                    data: { paymentReference: result.paymentReference }
-                });
-            }
-
-            // FIXED: Open Monnify checkout with proper redirect handling
-            const popup = paymentApi.openMonnifyCheckout(result.checkoutUrl);
-            
-            toast.success('Payment created! Complete your payment in the popup window.');
-
-            // FIXED: Enhanced popup monitoring - close popup and stay on current page
-            if (popup) {
-                const checkClosed = setInterval(async () => {
-                    if (popup.closed) {
-                        clearInterval(checkClosed);
-                        
-                        console.log('Payment popup closed - checking status');
-                        
-                        // FIXED: Check status and handle without redirects
-                        try {
-                            const verificationResult = await paymentApi.verifyPayment(result.paymentReference);
-                            console.log('Verification after popup close:', verificationResult.data.status);
-                            
-                            if (verificationResult.data.status === 'PAID') {
-                                // FIXED: Payment successful - stay on current page, refresh data
-                                toast.success(`Payment successful! ${formatAmount(verificationResult.data.amountPaid)} credited to your account.`);
-                                
-                                // Refresh balance and transactions in background
-                                await loadBalance();
-                                await loadTransactions();
-                                
-                                // User stays on current page (transactions, dashboard, etc.)
-                                
-                            } else if (verificationResult.data.status === 'FAILED') {
-                                // Payment failed - show error, user stays on current page
-                                toast.error('Payment was not successful. Please try again.');
-                                
-                            } else if (verificationResult.data.status === 'PENDING') {
-                                // Still processing - show info toast
-                                toast('Payment is being processed. You will be notified when complete.', {
-                                    icon: '⏳',
-                                    duration: 6000
-                                });
-                            }
-                            
-                        } catch (error) {
-                            console.warn('Payment verification failed after popup close:', error);
-                            toast('Payment status will be updated shortly. Check your transactions for confirmation.', {
-                                duration: 5000
-                            });
-                        }
-                    }
-                }, 1000);
-
-                // Cleanup interval after 10 minutes
-                setTimeout(() => {
-                    if (checkClosed) {
-                        clearInterval(checkClosed);
-                    }
-                }, 600000);
-            } else {
-                // FIXED: Popup blocked - set up redirect URL properly
-                const currentUrl = window.location.origin;
-                const redirectUrl = `${currentUrl}/payment-success?ref=${result.paymentReference}`;
-                
-                // Update checkout URL with proper redirect
-                const urlWithRedirect = `${result.checkoutUrl}&redirectUrl=${encodeURIComponent(redirectUrl)}`;
-                
-                toastInfo('Redirecting to payment page...');
-                setTimeout(() => {
-                    window.location.href = urlWithRedirect;
-                }, 1000);
-            }
-
-            return result;
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to create deposit');
-            throw error;
-        }
-    }, [dispatch, enableWebSocketUpdates, sendMessage]);
-
-    // FIXED: Simple verification - trust the server completely
-    const verifyPaymentStatus = useCallback(async (reference: string) => {
-        try {
-            const result = await dispatch(verifyPayment(reference)).unwrap();
-            
-            // FIXED: After verification, refresh transactions to get latest server state
-            await loadTransactions();
-            
-            return result;
-        } catch (error: any) {
-            console.error('Payment verification failed:', error);
-            throw error;
-        }
-    }, [dispatch, loadTransactions]);
-
-    const cancelPayment = useCallback(async (paymentReference: string) => {
-        try {
-            await paymentApi.cancelPayment(paymentReference);
-            dispatch(updateTransactionStatus({
-                reference: paymentReference,
-                status: 'CANCELLED'
-            }));
-            dispatch(removeActiveDeposit(paymentReference));
-            toast.success('Payment cancelled successfully');
-            
-            // FIXED: Refresh transactions to get server state
-            await loadTransactions();
-        } catch (error: any) {
-            toast.error(error.message || 'Failed to cancel payment');
-            throw error;
-        }
-    }, [dispatch, loadTransactions]);
-
-    const retryPayment = useCallback((checkoutUrl: string) => {
-        if (!checkoutUrl) {
-            toast.error('Checkout URL not available');
-            return null;
-        }
-
-        const popup = paymentApi.openMonnifyCheckout(checkoutUrl);
-        toastInfo('Payment window reopened. Complete your payment to continue.');
-        return popup;
-    }, []);
-
-    // Filter and pagination management
-    const updateFilters = useCallback((newFilters: Partial<typeof filters>) => {
-        dispatch(setFilters(newFilters));
-    }, [dispatch]);
-
-    const resetFilters = useCallback(() => {
-        dispatch(clearFilters());
-    }, [dispatch]);
-
-    const clearErrorState = useCallback(() => {
-        dispatch(clearError());
-    }, [dispatch]);
-
-    // Auto-fetch data on mount
-    useEffect(() => {
-        if (autoFetch) {
-            loadBalance();
-            loadTransactions();
-        }
-    }, [autoFetch, loadBalance, loadTransactions]);
-
-    // Utility functions
-    const formatAmount = useCallback((amount: number, currency = 'NGN') => {
-        return paymentApi.formatAmount(amount, currency);
-    }, []);
-
-    const validateAmount = useCallback((amount: number) => {
-        return paymentApi.validateDepositAmount(amount);
-    }, []);
-
-    const getTransactionStatus = useCallback((reference: string) => {
-        return transactions.find(t =>
-            t.payment_reference === reference ||
-            t.transaction_reference === reference
-        );
-    }, [transactions]);
-
-    const isDepositActive = useCallback((reference: string) => {
-        return activeDeposits.includes(reference);
-    }, [activeDeposits]);
-
-    // FIXED: Get transactions by settlement status - trust server data
-    const getTransactionsBySettlement = useCallback((settlementStatus: 'PENDING' | 'COMPLETED' | 'FAILED') => {
-        return transactions.filter(t => 
-            t.status === 'PAID' && 
-            (t as any).settlement_status === settlementStatus
-        );
-    }, [transactions]);
-
-    // FIXED: Calculate settlement statistics from server data
-    const getSettlementStats = useCallback(() => {
-        const paidTransactions = transactions.filter(t => t.status === 'PAID');
-        const settledTransactions = paidTransactions.filter(t => (t as any).settlement_status === 'COMPLETED');
-        const pendingSettlements = paidTransactions.filter(t => (t as any).settlement_status === 'PENDING');
-        const failedSettlements = paidTransactions.filter(t => (t as any).settlement_status === 'FAILED');
-
-        const settledAmount = settledTransactions.reduce((sum, t) => sum + ((t as any).settlement_amount || t.amount_paid), 0);
-        const pendingAmount = pendingSettlements.reduce((sum, t) => sum + t.amount_paid, 0);
-
-        return {
-            total_settled: settledTransactions.length,
-            pending_settlements: pendingSettlements.length,
-            failed_settlements: failedSettlements.length,
-            settled_amount: settledAmount,
-            pending_settlement_amount: pendingAmount,
-            settlement_rate: paidTransactions.length > 0 
-                ? Math.round((settledTransactions.length / paidTransactions.length) * 100)
-                : 0
-        };
-    }, [transactions]);
-
-    // Statistics and computed values
-    const statistics = {
-        totalBalance: balance?.balance || 0,
-        totalSpent: balance?.total_spent || 0,
-        totalDeposited: summary.total_deposited,
-        pendingAmount: summary.pending_amount,
-        successRate: summary.total_payments > 0
-            ? Math.round((summary.successful_payments / summary.total_payments) * 100)
-            : 0,
-        hasActiveDeposits: activeDeposits.length > 0,
-        pendingTransactions: transactions.filter(t => t.status === 'PENDING').length,
-        failedTransactions: transactions.filter(t => t.status === 'FAILED').length,
-        settledTransactions: transactions.filter(t => (t as any).settlement_status === 'COMPLETED').length,
-        pendingSettlements: transactions.filter(t => (t as any).settlement_status === 'PENDING' && t.status === 'PAID').length,
-        ...getSettlementStats()
-    };
-
-    return {
-        // State
-        balance,
-        transactions,
-        loading,
-        error,
-        pagination,
-        summary,
-        filters,
-        activeDeposits,
-        statistics,
-
-        // Actions
-        loadBalance,
-        loadTransactions,
-        initiateDeposit,
-        verifyPaymentStatus,
-        cancelPayment,
-        retryPayment,
-        updateFilters,
-        resetFilters,
-        clearErrorState,
-
-        // Settlement-specific
-        getSettlementsByStatus: getTransactionsBySettlement,
-        getSettlementStats,
-
-        // Utilities
-        formatAmount,
-        validateAmount,
-        getTransactionStatus,
-        isDepositActive,
-
-        // WebSocket status
-        isWebSocketEnabled: enableWebSocketUpdates,
-    };
+    // WebSocket integration
+    pendingTransactions,
+    retryingPayments
+  }), [
+    state,
+    createDeposit,
+    loadTransactions,
+    refreshBalance,
+    refreshTransactions,
+    refreshSummary,
+    verifyPayment,
+    cancelPayment,
+    manualVerifyTransaction,
+    updateFilters,
+    formatAmount,
+    getStatusDisplay,
+    getPaymentMethodName,
+    pendingTransactions,
+    retryingPayments
+  ]);
 };
+
+// Separate hook for WebSocket payment notifications
+export const usePaymentWebSocket = (options: { enabled?: boolean } = {}) => {
+  const { enabled = true } = options;
+  const { user } = useAppSelector(state => state.auth);
+
+  return useWebSocket(
+    useCallback((message: any) => {
+      if (!enabled || !user) return;
+
+      // Handle payment-specific WebSocket messages
+      switch (message.type) {
+        case 'payment_successful':
+        case 'payment_failed':
+        case 'payment_reversed':
+        case 'balance_updated':
+        case 'settlement_completed':
+        case 'settlement_failed':
+          // These are handled by the main payment hook
+          console.log(`Payment WebSocket: ${message.type}`, message.data);
+          break;
+      }
+    }, [enabled, user]),
+    enabled
+  );
+};
+
+export default usePayment;

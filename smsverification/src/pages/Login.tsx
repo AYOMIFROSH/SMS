@@ -71,6 +71,12 @@ useEffect(() => {
 
     if (!validateForm()) return;
 
+    console.log("Submitting login payload:", {
+  username: formData.username,
+  password: formData.password
+});
+
+
     setLoading(true);
 
     try {

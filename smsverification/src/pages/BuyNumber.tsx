@@ -1,4 +1,4 @@
-// src/pages/BuyNumber.tsx - Mobile Responsive Version
+// src/pages/BuyNumber.tsx - Updated to use real-time payment balance
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
@@ -13,6 +13,7 @@ import {
   setSelectedOperator
 } from '@/store/slices/servicesSlice';
 import { purchaseNumber } from '@/store/slices/numbersSlice';
+import { usePayment } from '@/hooks/usePayment';
 import ServiceGrid from '@/components/services/ServiceGrid';
 import CountrySelector from '@/components/services/CountrySelector';
 import OperatorSelector from '@/components/services/OperatorSelector';
@@ -23,7 +24,7 @@ import { AlertCircle, CheckCircle, Info, RefreshCw, ArrowLeft, ChevronDown, Chev
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
-    useDocumentTitle("SMS Purchase Numbers");
+  useDocumentTitle("SMS Purchase Numbers");
 
   const dispatch = useDispatch<AppDispatch>();
   const { 
@@ -42,7 +43,9 @@ const BuyNumber: React.FC = () => {
   } = useSelector((state: RootState) => state.services);
   
   const { purchasing } = useSelector((state: RootState) => state.numbers);
-  const { stats } = useSelector((state: RootState) => state.dashboard);
+
+  // Use payment hook for real-time balance
+  const payment = usePayment({ autoFetch: true, enableWebSocket: true });
 
   const [step, setStep] = useState<'country' | 'service' | 'operator' | 'confirm'>('country');
   const [searchQuery, setSearchQuery] = useState('');
@@ -116,6 +119,12 @@ const BuyNumber: React.FC = () => {
       return;
     }
 
+    // Check real-time balance before purchase
+    if (!canAfford()) {
+      toast.error('Insufficient balance. Please top up your account.');
+      return;
+    }
+
     try {
       const purchaseData = {
         service: selectedService,
@@ -133,6 +142,9 @@ const BuyNumber: React.FC = () => {
         duration: 5000
       });
       
+      // Refresh balance after successful purchase
+      payment.refreshBalance();
+      
       // Reset selections
       dispatch(setSelectedCountry(null));
       dispatch(setSelectedService(null));
@@ -142,6 +154,8 @@ const BuyNumber: React.FC = () => {
       
     } catch (error: any) {
       console.error('❌ Purchase failed:', error);
+      // Refresh balance in case of error too (might have been deducted)
+      payment.refreshBalance();
     }
   };
 
@@ -163,8 +177,9 @@ const BuyNumber: React.FC = () => {
 
   const canAfford = () => {
     const price = getCurrentPrice();
-    if (!price || !stats?.balance) return false;
-    return Number(stats.balance) >= price;
+    const currentBalance = payment.balance?.balance ?? 0;
+    if (!price || !currentBalance) return false;
+    return currentBalance >= price;
   };
 
   const resetSelection = () => {
@@ -179,6 +194,7 @@ const BuyNumber: React.FC = () => {
   const refreshData = () => {
     dispatch(fetchServices());
     dispatch(fetchCountries());
+    payment.refreshBalance(); // Also refresh payment balance
     if (selectedCountry) {
       dispatch(fetchOperators(selectedCountry));
     }
@@ -236,6 +252,9 @@ const BuyNumber: React.FC = () => {
     };
   };
 
+  // Get current balance with proper fallback
+  const currentBalance = payment.balance?.balance ?? 0;
+
   // Loading state for initial data
   if (loading && (!services.length || !countries.length)) {
     return (
@@ -276,8 +295,8 @@ const BuyNumber: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 lg:bg-transparent">
-      {/* Mobile Header */}
-      <div className="lg:hidden bg-white border-b border-gray-200 sticky  z-20">
+      {/* Mobile Header with Balance Indicator */}
+      <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -299,13 +318,22 @@ const BuyNumber: React.FC = () => {
               </div>
             </div>
             
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="p-2 text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            <div className="flex items-center space-x-2">
+              {/* Balance indicator */}
+              <div className="text-xs text-gray-600 flex items-center">
+                {payment.loading.balance && (
+                  <div className="w-2 h-2 border border-gray-400 border-t-blue-500 rounded-full animate-spin mr-1"></div>
+                )}
+                ${currentBalance.toFixed(2)}
+              </div>
+              <button
+                onClick={refreshData}
+                disabled={loading || payment.loading.balance}
+                className="p-2 text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw className={`h-5 w-5 ${(loading || payment.loading.balance) ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {/* Mobile Progress Bar */}
@@ -385,32 +413,44 @@ const BuyNumber: React.FC = () => {
         </div>
       </div>
 
-      {/* Desktop Header - Hidden on mobile */}
+      {/* Desktop Header - Hidden on mobile with Balance Display */}
       <div className="hidden lg:block">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-600">Buy SMS Number</h1>
-            <p className="text-gray-300 mt-1">Select a country, service, and operator to purchase an SMS number.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Buy SMS Number</h1>
+            <p className="text-gray-400 mt-0.5">Select a country, service, and operator to purchase an SMS number.</p>
           </div>
           
-          <div className="flex flex-col sm:flex-row gap-3">
-            {(selectedCountry || selectedService || selectedOperator) && (
-              <button
-                onClick={resetSelection}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-              >
-                Reset Selection
-              </button>
-            )}
+          <div className="flex items-center gap-4">
+            {/* Balance display */}
+            <div className="bg-primary-50 px-4 py-2 rounded-lg flex items-center">
+              <span className="text-sm text-primary-600 font-medium">
+                Balance: ${currentBalance.toFixed(4)}
+              </span>
+              {payment.loading.balance && (
+                <div className="ml-2 w-3 h-3 border border-primary-400 border-t-primary-600 rounded-full animate-spin"></div>
+              )}
+            </div>
             
-            <button
-              onClick={refreshData}
-              disabled={loading}
-              className="flex items-center justify-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
+            <div className="flex gap-3">
+              {(selectedCountry || selectedService || selectedOperator) && (
+                <button
+                  onClick={resetSelection}
+                  className="px-2 py-1 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Reset Selection
+                </button>
+              )}
+              
+              <button
+                onClick={refreshData}
+                disabled={loading || payment.loading.balance}
+                className="flex items-center justify-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${(loading || payment.loading.balance) ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -445,6 +485,16 @@ const BuyNumber: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Real-time Balance Update Notification */}
+      {/* {payment.loading.balance && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <div className="flex items-center">
+            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+            <span className="text-sm text-blue-800">Updating balance...</span>
+          </div>
+        </div>
+      )} */}
 
       {/* Content Container - Responsive */}
       <div className="lg:bg-white lg:rounded-lg lg:shadow-sm lg:border lg:border-gray-200">
@@ -528,12 +578,13 @@ const BuyNumber: React.FC = () => {
               </div>
             </div>
 
-            {/* Price Display */}
+            {/* Enhanced Price Display with real-time balance */}
             <PriceDisplay
               price={getCurrentPrice()}
-              balance={Number(stats?.balance || 0)}
+              balance={currentBalance}
               canAfford={canAfford()}
               loading={pricesLoading}
+              balanceLoading={payment.loading.balance}
             />
 
             {/* Restrictions - Mobile Optimized */}
@@ -555,13 +606,13 @@ const BuyNumber: React.FC = () => {
               </div>
             )}
 
-            {/* Action Buttons - Mobile Optimized */}
+            {/* Action Buttons - Mobile Optimized with enhanced checks */}
             <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 mt-6">
               <button
                 onClick={handlePurchase}
-                disabled={purchasing || !canAfford() || pricesLoading}
+                disabled={purchasing || !canAfford() || pricesLoading || payment.loading.balance}
                 className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${
-                  purchasing || !canAfford() || pricesLoading
+                  purchasing || !canAfford() || pricesLoading || payment.loading.balance
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-primary-600 text-white hover:bg-primary-700'
                 }`}
@@ -575,6 +626,11 @@ const BuyNumber: React.FC = () => {
                   <span className="flex items-center justify-center">
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Loading Price...</span>
+                  </span>
+                ) : payment.loading.balance ? (
+                  <span className="flex items-center justify-center">
+                    <LoadingSpinner size="sm" color="white" />
+                    <span className="ml-2">Updating Balance...</span>
                   </span>
                 ) : (
                   'Purchase Number'
@@ -590,7 +646,7 @@ const BuyNumber: React.FC = () => {
               </button>
             </div>
 
-            {/* Affordability Warning - Mobile Optimized */}
+            {/* Enhanced Affordability Warning - Mobile Optimized */}
             {!canAfford() && getCurrentPrice() && (
               <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-start space-x-3">
@@ -598,9 +654,12 @@ const BuyNumber: React.FC = () => {
                   <div className="flex-1">
                     <p className="text-sm font-medium text-yellow-800">Insufficient Balance</p>
                     <p className="text-xs lg:text-sm text-yellow-700 mt-1">
-                      You need ${getCurrentPrice()?.toFixed(4)} but only have ${Number(stats?.balance || 0).toFixed(4)}.
-                      Please top up your account to continue.
+                      You need ${getCurrentPrice()?.toFixed(4)} but only have ${currentBalance.toFixed(4)}.
+                      Please <a href="/transactions" className="underline hover:no-underline">top up your account</a> to continue.
                     </p>
+                    <div className="mt-2 text-xs text-yellow-600">
+                      Difference: ${Math.abs(currentBalance - (getCurrentPrice() || 0)).toFixed(4)}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -609,7 +668,7 @@ const BuyNumber: React.FC = () => {
         )}
       </div>
 
-      {/* Mobile Bottom Navigation - Fixed position */}
+      {/* Mobile Bottom Navigation - Fixed position with balance info */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-30">
         <div className="flex items-center justify-between">
           {step !== 'country' && (
@@ -622,14 +681,26 @@ const BuyNumber: React.FC = () => {
             </button>
           )}
           
-          {summary.price && (
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4">
+            {summary.price && (
               <div className="text-right">
                 <p className="text-xs text-gray-500">Total Price</p>
                 <p className="text-lg font-bold text-gray-900">${summary.price.toFixed(4)}</p>
               </div>
+            )}
+            
+            <div className="text-right">
+              <p className="text-xs text-gray-500 flex items-center">
+                Balance
+                {payment.loading.balance && (
+                  <div className="ml-1 w-2 h-2 border border-gray-400 border-t-blue-500 rounded-full animate-spin"></div>
+                )}
+              </p>
+              <p className={`text-sm font-bold ${canAfford() ? 'text-green-600' : 'text-red-600'}`}>
+                ${currentBalance.toFixed(4)}
+              </p>
             </div>
-          )}
+          </div>
         </div>
       </div>
 

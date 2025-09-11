@@ -1,9 +1,9 @@
-// src/components/common/Header.tsx
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Bell, User, LogOut, Settings, Menu, X } from 'lucide-react';
+import { Bell, User, LogOut, Settings, Menu, X, Wallet } from 'lucide-react';
 import { RootState } from '@/store/store';
+import { usePayment } from '@/hooks/usePayment';
 import useAuth from '@/hooks/useAuth';
 
 interface HeaderProps {
@@ -13,12 +13,13 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
   const user = useSelector((state: RootState) => state.auth.user);
-const stats = useSelector((state: RootState) => state.dashboard.stats);
-
+  
+  // Use payment hook for accurate real-time balance
+  const payment = usePayment({ autoFetch: true, enableWebSocket: true });
+  
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
-  
 
   const handleLogout = async () => {
     try {
@@ -45,6 +46,10 @@ const stats = useSelector((state: RootState) => state.dashboard.stats);
     }
   }, [userMenuOpen]);
 
+  // Get accurate balance with fallback
+  const currentBalance = payment.balance?.balance ?? 0;
+  const isBalanceLoading = payment.loading.balance;
+
   return (
     <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
       <div className="px-4 sm:px-6 lg:px-8">
@@ -65,24 +70,50 @@ const stats = useSelector((state: RootState) => state.dashboard.stats);
               )}
             </button>
 
-            {/* Balance - Responsive display */}
-            <div className="hidden sm:block bg-primary-50 px-3 py-2 rounded-lg">
+            {/* Enhanced Balance Display - Desktop */}
+            <div className="hidden sm:flex items-center bg-primary-50 px-3 py-2 rounded-lg">
+              <Wallet className="h-4 w-4 text-primary-600 mr-2" />
               <span className="text-sm text-primary-600 font-medium whitespace-nowrap">
-                Balance: ${stats?.balance?.toFixed(2) || '0.00'}
+                {isBalanceLoading ? (
+                  <div className="flex items-center">
+                    <div className="w-2 h-2 bg-primary-400 rounded-full mr-1 animate-pulse"></div>
+                    Updating...
+                  </div>
+                ) : (
+                  `Balance: $${currentBalance.toFixed(4)}`
+                )}
               </span>
+              {payment.pendingTransactions.length > 0 && (
+                <div className="ml-2 w-2 h-2 bg-blue-500 rounded-full animate-pulse" title={`${payment.pendingTransactions.length} pending transactions`}></div>
+              )}
             </div>
           </div>
 
           {/* Right side - Notifications + User menu */}
           <div className="flex items-center space-x-2 sm:space-x-4">
             {/* Balance for small screens - compact version */}
-            <div className="sm:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium whitespace-nowrap">
-              ${stats?.balance?.toFixed(2) || '0.00'}
+            <div className="sm:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium flex items-center">
+              {isBalanceLoading ? (
+                <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse mr-1"></div>
+              ) : (
+                <Wallet className="h-3 w-3 mr-1" />
+              )}
+              <span className="whitespace-nowrap">
+                {isBalanceLoading ? '...' : `$${currentBalance.toFixed(2)}`}
+              </span>
+              {payment.pendingTransactions.length > 0 && (
+                <div className="ml-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
+              )}
             </div>
 
-            {/* Notifications */}
-            <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500">
+            {/* Notifications with pending indicator */}
+            <button className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500">
               <Bell className="h-5 w-5" />
+              {payment.pendingTransactions.length > 0 && (
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+                  <span className="text-xs text-white font-bold">{payment.pendingTransactions.length > 9 ? '9+' : payment.pendingTransactions.length}</span>
+                </div>
+              )}
               <span className="sr-only">Notifications</span>
             </button>
 
@@ -100,15 +131,38 @@ const stats = useSelector((state: RootState) => state.dashboard.stats);
                 </div>
               </button>
 
-              {/* Dropdown menu */}
+              {/* Enhanced Dropdown menu */}
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50">
-                  {/* Mobile user info */}
-                  <div className="px-4 py-3 border-b border-gray-100 sm:hidden">
-                    <div className="text-sm font-medium text-gray-900">{user?.username}</div>
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg border border-gray-200 z-50">
+                  {/* User info with balance */}
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <div className="text-sm font-medium text-gray-900 mb-1">{user?.username}</div>
+                    <div className="text-xs text-gray-500 flex items-center">
+                      <Wallet className="h-3 w-3 mr-1" />
+                      {isBalanceLoading ? (
+                        'Updating balance...'
+                      ) : (
+                        `$${currentBalance.toFixed(4)} available`
+                      )}
+                    </div>
                   </div>
                   
                   <div className="py-1">
+                    <button
+                      onClick={() => {
+                        navigate('/transactions');
+                        setUserMenuOpen(false);
+                      }}
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <Wallet className="h-4 w-4 mr-3" />
+                      Transactions
+                      {payment.pendingTransactions.length > 0 && (
+                        <span className="ml-auto bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                          {payment.pendingTransactions.length}
+                        </span>
+                      )}
+                    </button>
                     <button
                       onClick={() => {
                         navigate('/settings');

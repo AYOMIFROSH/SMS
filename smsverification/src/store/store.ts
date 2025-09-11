@@ -5,7 +5,7 @@ import authReducer from './slices/authSlice';
 import dashboardReducer from './slices/dashboardSlice';
 import numbersReducer from './slices/numbersSlice';
 import servicesReducer from './slices/servicesSlice';
-import paymentReducer from './slices/paymentSlice'; // Add payment slice
+import paymentReducer from './slices/paymentSlice';
 
 // NO PERSISTENCE - rely entirely on httpOnly cookies for session management
 const rootReducer = combineReducers({
@@ -13,7 +13,7 @@ const rootReducer = combineReducers({
   dashboard: dashboardReducer,
   numbers: numbersReducer,
   services: servicesReducer,
-  payment: paymentReducer, // Add payment reducer
+  payment: paymentReducer, // New payment slice
 });
 
 export const store = configureStore({
@@ -22,19 +22,16 @@ export const store = configureStore({
     getDefaultMiddleware({
       serializableCheck: {
         ignoredActions: [
-          // Ignore these action types in serializability check
-          'payment/fetchBalance/pending',
-          'payment/fetchBalance/fulfilled',
-          'payment/fetchTransactions/pending',
-          'payment/fetchTransactions/fulfilled',
-          'payment/createDeposit/pending',
-          'payment/createDeposit/fulfilled',
+          // Ignore payment-related actions with non-serializable payloads
+          'payment/setLoading',
+          'payment/updateBalance',
+          'payment/addTransaction',
+          'payment/updateTransactionStatus'
         ],
         ignoredPaths: [
-          // Ignore these paths in state
-          'payment.balance.created_at',
-          'payment.balance.updated_at',
-          'payment.transactions',
+          // Ignore certain paths in state that might contain non-serializable data
+          'payment.transactions.meta',
+          'payment.lastUpdated'
         ],
       },
     }),

@@ -11,7 +11,6 @@ import { History } from '@/pages/History';
 import { Transactions } from '@/pages/Transactions';
 import { Settings } from '@/pages/Settings';
 import Login from '@/pages/Login';
-import PaymentSuccess from '@/components/payment/PaymentSuccess';
 import PrivateRoute from '@/components/common/PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoadingSpinner from './components/common/LoadingSpinner';
@@ -168,11 +167,6 @@ const AppContent: React.FC = () => {
           } />
 
           {/* Payment Success Route - Semi-protected (requires URL params) */}
-          <Route path="/transactions/success" element={
-            <PrivateRoute>
-              <PaymentSuccess />
-            </PrivateRoute>
-          } />
 
           {/* Protected Routes */}
           <Route path="/" element={
