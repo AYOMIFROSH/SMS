@@ -63,11 +63,21 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     </div>
   );
 
-  if (overlay) {
+if (overlay) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 shadow-xl">
-          {content}
+        <div className="flex flex-col items-center justify-center space-y-2">
+          <div className="relative">
+            {/* SMS icon with pulse animation - using white for visibility */}
+            <MessageSquare className={`${sizeClasses[size]} border-white text-white animate-pulse drop-shadow-lg`} />
+            {/* Small dot indicator */}
+            <div className={`absolute -top-1 -right-1 w-2 h-2 bg-white rounded-full animate-ping drop-shadow-lg`} />
+          </div>
+          {text && (
+            <p className={`text-white font-medium ${textSizeClasses[size]} drop-shadow-lg text-center`}>
+              {text}
+            </p>
+          )}
         </div>
       </div>
     );
