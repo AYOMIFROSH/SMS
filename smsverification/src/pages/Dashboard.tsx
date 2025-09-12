@@ -1,4 +1,4 @@
-// src/pages/Dashboard.tsx - Updated to use payment balance
+// src/pages/Dashboard.tsx - Updated with balance sync
 import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
@@ -32,6 +32,51 @@ const Dashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [dispatch]);
+
+  // Enhanced refresh function that triggers global balance sync
+  const handleRefresh = async () => {
+    try {
+      // Refresh dashboard data
+      dispatch(fetchDashboardStats());
+      dispatch(fetchActivity());
+      
+      // Refresh payment balance
+      await payment.refreshBalance();
+      
+      // Dispatch custom event to notify other components (like Header) to refresh
+      window.dispatchEvent(new CustomEvent('dashboard:refresh', {
+        detail: { 
+          source: 'dashboard',
+          timestamp: Date.now(),
+          includeBalance: true 
+        }
+      }));
+      
+      console.log('Dashboard refresh completed with balance sync');
+      
+    } catch (error) {
+      console.error('Dashboard refresh failed:', error);
+    }
+  };
+
+  // Listen for balance refresh requests from other components
+  useEffect(() => {
+    const handleBalanceRefreshRequest = async (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      
+      // Only respond if the request is not from this component
+      if (detail?.source !== 'dashboard') {
+        console.log('Balance refresh requested by external component');
+        await payment.refreshBalance();
+      }
+    };
+
+    window.addEventListener('balance:refreshRequest', handleBalanceRefreshRequest);
+    
+    return () => {
+      window.removeEventListener('balance:refreshRequest', handleBalanceRefreshRequest);
+    };
+  }, [payment.refreshBalance]);
 
   // Merge dashboard stats with payment balance for accurate display
   const enhancedStats = stats ? {
@@ -67,28 +112,23 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="flex space-x-3">
           <button 
-            onClick={() => {
-              dispatch(fetchDashboardStats());
-              dispatch(fetchActivity());
-              payment.refreshBalance(); // Also refresh payment balance
-            }}
+            onClick={handleRefresh}
             disabled={loading || payment.loading.balance}
-            className="px-3 py-2 sm:px-4 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="px-3 py-2 sm:px-4 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading || payment.loading.balance ? 'Refreshing...' : 'Refresh'}
+            {loading || payment.loading.balance ? (
+              <div className="flex items-center">
+                <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                Refreshing...
+              </div>
+            ) : (
+              'Refresh'
+            )}
           </button>
         </div>
       </div>
 
-      {/* Real-time Balance Status */}
-      {/* {payment.loading.balance && (
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-          <div className="flex items-center">
-            <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-            <span className="text-sm text-blue-800">Updating balance...</span>
-          </div>
-        </div>
-      )} */}
+
 
       {/* Stats Cards - Use enhanced stats with accurate balance */}
       <StatsCards stats={enhancedStats} />

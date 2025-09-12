@@ -1,7 +1,8 @@
+// src/components/common/Header.tsx - Updated with balance sync
 import React from 'react';
 import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Bell, User, LogOut, Settings, Menu, X, Wallet } from 'lucide-react';
+import { Bell, User, LogOut, Settings, Menu, X, Wallet, RefreshCw } from 'lucide-react';
 import { RootState } from '@/store/store';
 import { usePayment } from '@/hooks/usePayment';
 import useAuth from '@/hooks/useAuth';
@@ -20,6 +21,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
 
   const handleLogout = async () => {
     try {
@@ -30,6 +32,69 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
       navigate('/login');
     }
   };
+
+  // Enhanced balance refresh handler
+  const handleBalanceRefresh = async () => {
+    if (isRefreshing || payment.loading.balance) return;
+
+    try {
+      setIsRefreshing(true);
+      console.log('Header: Manually refreshing balance...');
+      
+      // Refresh balance in this component
+      await payment.refreshBalance();
+      
+      // Request other components to refresh their balance as well
+      window.dispatchEvent(new CustomEvent('balance:refreshRequest', {
+        detail: { 
+          source: 'header',
+          timestamp: Date.now() 
+        }
+      }));
+      
+      console.log('Header: Balance refresh completed');
+      
+    } catch (error) {
+      console.error('Header: Balance refresh failed:', error);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 1000); // Prevent spam clicking
+    }
+  };
+
+  // Listen for dashboard refresh events to sync balance
+  React.useEffect(() => {
+    const handleDashboardRefresh = async (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      
+      if (detail?.includeBalance) {
+        console.log('Header: Dashboard refresh detected, syncing balance...');
+        try {
+          await payment.refreshBalance();
+          console.log('Header: Balance synced with dashboard refresh');
+        } catch (error) {
+          console.error('Header: Failed to sync balance with dashboard refresh:', error);
+        }
+      }
+    };
+
+    const handleBalanceRefreshRequest = async (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      
+      // Only respond if the request is not from this component
+      if (detail?.source !== 'header') {
+        console.log('Header: Balance refresh requested by external component');
+        await payment.refreshBalance();
+      }
+    };
+
+    window.addEventListener('dashboard:refresh', handleDashboardRefresh);
+    window.addEventListener('balance:refreshRequest', handleBalanceRefreshRequest);
+    
+    return () => {
+      window.removeEventListener('dashboard:refresh', handleDashboardRefresh);
+      window.removeEventListener('balance:refreshRequest', handleBalanceRefreshRequest);
+    };
+  }, [payment.refreshBalance]);
 
   // Close user menu when clicking outside
   React.useEffect(() => {
@@ -48,7 +113,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
 
   // Get accurate balance with fallback
   const currentBalance = payment.balance?.balance ?? 0;
-  const isBalanceLoading = payment.loading.balance;
+  const isBalanceLoading = payment.loading.balance || isRefreshing;
 
   return (
     <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-40">
@@ -70,8 +135,8 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
               )}
             </button>
 
-            {/* Enhanced Balance Display - Desktop */}
-            <div className="hidden sm:flex items-center bg-primary-50 px-3 py-2 rounded-lg">
+            {/* Enhanced Balance Display - Desktop with refresh button */}
+            <div className="hidden sm:flex items-center bg-primary-50 px-3 py-2 rounded-lg group">
               <Wallet className="h-4 w-4 text-primary-600 mr-2" />
               <span className="text-sm text-primary-600 font-medium whitespace-nowrap">
                 {isBalanceLoading ? (
@@ -86,13 +151,23 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
               {payment.pendingTransactions.length > 0 && (
                 <div className="ml-2 w-2 h-2 bg-blue-500 rounded-full animate-pulse" title={`${payment.pendingTransactions.length} pending transactions`}></div>
               )}
+              
+              {/* Refresh button - shows on hover */}
+              <button
+                onClick={handleBalanceRefresh}
+                disabled={isBalanceLoading}
+                className="ml-2 p-1 rounded text-primary-600 hover:bg-primary-100 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Refresh balance"
+              >
+                <RefreshCw className={`h-3 w-3 ${isBalanceLoading ? 'animate-spin' : ''}`} />
+              </button>
             </div>
           </div>
 
           {/* Right side - Notifications + User menu */}
           <div className="flex items-center space-x-2 sm:space-x-4">
-            {/* Balance for small screens - compact version */}
-            <div className="sm:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium flex items-center">
+            {/* Balance for small screens - compact version with touch-friendly refresh */}
+            <div className="sm:hidden bg-primary-50 px-2 py-1 rounded text-xs text-primary-600 font-medium flex items-center group">
               {isBalanceLoading ? (
                 <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse mr-1"></div>
               ) : (
@@ -104,6 +179,15 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
               {payment.pendingTransactions.length > 0 && (
                 <div className="ml-1 w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
               )}
+              
+              {/* Mobile refresh button */}
+              <button
+                onClick={handleBalanceRefresh}
+                disabled={isBalanceLoading}
+                className="ml-1 p-1 rounded text-primary-600 hover:bg-primary-100 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-2.5 w-2.5 ${isBalanceLoading ? 'animate-spin' : ''}`} />
+              </button>
             </div>
 
             {/* Notifications with pending indicator */}
@@ -134,16 +218,26 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
               {/* Enhanced Dropdown menu */}
               {userMenuOpen && (
                 <div className="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg border border-gray-200 z-50">
-                  {/* User info with balance */}
+                  {/* User info with balance and refresh option */}
                   <div className="px-4 py-3 border-b border-gray-100">
                     <div className="text-sm font-medium text-gray-900 mb-1">{user?.username}</div>
-                    <div className="text-xs text-gray-500 flex items-center">
-                      <Wallet className="h-3 w-3 mr-1" />
-                      {isBalanceLoading ? (
-                        'Updating balance...'
-                      ) : (
-                        `$${currentBalance.toFixed(4)} available`
-                      )}
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-gray-500 flex items-center">
+                        <Wallet className="h-3 w-3 mr-1" />
+                        {isBalanceLoading ? (
+                          'Updating balance...'
+                        ) : (
+                          `$${currentBalance.toFixed(4)} available`
+                        )}
+                      </div>
+                      <button
+                        onClick={handleBalanceRefresh}
+                        disabled={isBalanceLoading}
+                        className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                        title="Refresh balance"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isBalanceLoading ? 'animate-spin' : ''}`} />
+                      </button>
                     </div>
                   </div>
                   
