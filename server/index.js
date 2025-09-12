@@ -444,28 +444,28 @@ async function startServer() {
 
 }
 
-setInterval(async () => {
-  try {
-    const flutterwaveService = require('./services/flutterwaveServices');
-    const monitor = await flutterwaveService.monitorPendingSettlements();
+// setInterval(async () => {
+//   try {
+//     const flutterwaveService = require('./services/flutterwaveServices');
+//     const monitor = await flutterwaveService.monitorPendingSettlements();
 
-    if (monitor.alert_threshold_exceeded) {
-      logger.error('🚨 ALERT: High number of pending settlements detected', {
-        total_pending: monitor.total_pending,
-        old_pending: monitor.old_pending
-      });
+//     if (monitor.alert_threshold_exceeded) {
+//       logger.error('🚨 ALERT: High number of pending settlements detected', {
+//         total_pending: monitor.total_pending,
+//         old_pending: monitor.old_pending
+//       });
 
-      // You could send alerts to Slack, email, etc. here
-      // Example: await sendSlackAlert(`Alert: ${monitor.old_pending} payments pending over 24h`);
-    } else if (monitor.old_pending > 0) {
-      logger.warn('⚠️ Some payments pending settlement', {
-        old_pending: monitor.old_pending
-      });
-    }
-  } catch (error) {
-    logger.warn('Pending settlements monitoring error:', error.message);
-  }
-}, 60 * 60 * 1000); // Every hour
+//       // You could send alerts to Slack, email, etc. here
+//       // Example: await sendSlackAlert(`Alert: ${monitor.old_pending} payments pending over 24h`);
+//     } else if (monitor.old_pending > 0) {
+//       logger.warn('⚠️ Some payments pending settlement', {
+//         old_pending: monitor.old_pending
+//       });
+//     }
+//   } catch (error) {
+//     logger.warn('Pending settlements monitoring error:', error.message);
+//   }
+// }, 60 * 60 * 1000); // Every hour
 
 // Graceful shutdown
 async function gracefulShutdown(signal) {
