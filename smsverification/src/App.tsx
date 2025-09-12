@@ -13,7 +13,7 @@ import { Settings } from '@/pages/Settings';
 import Login from '@/pages/Login';
 import PrivateRoute from '@/components/common/PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
-import LoadingSpinner from './components/common/LoadingSpinner';
+import  { PageLoader } from './components/common/LoadingSpinner';
 import useWebSocket from './hooks/useWebsocket';
 import useAuth from '@/hooks/useAuth';
 import { healthCheck } from '@/api/client';
@@ -53,8 +53,8 @@ const SecurityCheck: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <LoadingSpinner size="lg" />
-          <p className="mt-4 text-gray-600">Initializing secure connection...</p>
+          <PageLoader message='Initializing secure connection...' />
+          {/* <p className="mt-4 text-gray-600">Initializing secure connection...</p> */}
         </div>
       </div>
     );
@@ -124,8 +124,7 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="text-center">
-          <LoadingSpinner size="lg" />
-          <p className="mt-4 text-gray-600">Loading application...</p>
+          <PageLoader message='Setting Up Application...' />
         </div>
       </div>
     );

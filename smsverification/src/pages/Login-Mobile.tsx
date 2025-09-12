@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast from "react-hot-toast";
-import LoadingSpinner from "@/components/common/LoadingSpinner";
+import LoadingSpinner, { ButtonLoader } from "@/components/common/LoadingSpinner";
 import { login as loginThunk } from "@/store/slices/authSlice";
 import useAuth from "@/hooks/useAuth";
 import useMobileAuth from "@/hooks/useMobileAuth";
@@ -280,7 +280,7 @@ const Login: React.FC = () => {
             >
               {loading ? (
                 <>
-                  <LoadingSpinner size="sm" color="white" />
+                  <ButtonLoader />
                   <span className="ml-2">
                     {isMobile ? 'Signing In (Mobile)...' : 'Signing In...'}
                   </span>
@@ -293,11 +293,11 @@ const Login: React.FC = () => {
 
           <div className="mt-8 text-center space-y-4">
             <p className="text-sm text-slate-500">
-              Secure authentication with HTTP-only cookies
+              Secure sms purchasing platform 
             </p>
             
             <div className="flex justify-center space-x-4 text-xs text-slate-400">
-              <span>CSRF Protected</span>
+              <span>payment secure</span>
               <span>•</span>
               <span>End-to-End Encrypted</span>
               <span>•</span>

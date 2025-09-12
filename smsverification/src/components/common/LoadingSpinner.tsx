@@ -1,5 +1,6 @@
 // src/components/common/LoadingSpinner.tsx - Enhanced loading spinner component
 import React from 'react';
+import { MessageSquare } from 'lucide-react';
 
 interface LoadingSpinnerProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
@@ -27,13 +28,13 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
 
   // Color classes
   const colorClasses = {
-    primary: 'border-primary-600',
-    white: 'border-white',
-    gray: 'border-gray-600',
-    blue: 'border-blue-600',
-    green: 'border-green-600',
-    red: 'border-red-600',
-    yellow: 'border-yellow-600'
+    primary: 'border-primary-600 text-primary-600',
+    white: 'border-white text-white',
+    gray: 'border-gray-600 text-gray-600',
+    blue: 'border-blue-600 text-blue-600',
+    green: 'border-green-600 text-green-600',
+    red: 'border-red-600 text-red-600',
+    yellow: 'border-yellow-600 text-yellow-600'
   };
 
   // Text size classes based on spinner size
@@ -45,17 +46,15 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     xl: 'text-xl'
   };
 
-  const spinnerClasses = `
-    animate-spin rounded-full border-2 border-transparent
-    ${sizeClasses[size]}
-    ${colorClasses[color]}
-    border-t-current
-    ${className}
-  `.trim();
-
+  // SMS-themed spinner with message icon
   const content = (
     <div className="flex flex-col items-center justify-center space-y-2">
-      <div className={spinnerClasses} />
+      <div className="relative">
+        {/* SMS icon with pulse animation */}
+        <MessageSquare className={`${sizeClasses[size]} ${colorClasses[color]} animate-pulse`} />
+        {/* Small dot indicator */}
+        <div className={`absolute -top-1 -right-1 w-2 h-2 bg-current rounded-full animate-ping ${colorClasses[color]}`} />
+      </div>
       {text && (
         <p className={`text-gray-600 font-medium ${textSizeClasses[size]}`}>
           {text}
@@ -74,11 +73,11 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     );
   }
 
-  return content;
+  return <div className={className}>{content}</div>;
 };
 
 // Specialized loading components for common use cases
-export const PageLoader: React.FC<{ message?: string }> = ({ message = "Loading..." }) => (
+export const PageLoader: React.FC<{ message?: string }> = ({ message = "My Sms Number" }) => (
   <div className="min-h-[400px] flex items-center justify-center">
     <LoadingSpinner size="lg" text={message} />
   </div>

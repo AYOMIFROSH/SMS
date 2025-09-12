@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast from "react-hot-toast";
-import LoadingSpinner from "@/components/common/LoadingSpinner";
+import { PageLoader, ButtonLoader } from "@/components/common/LoadingSpinner";
 import { login as loginThunk } from "@/store/slices/authSlice";
 import useAuth from "@/hooks/useAuth";
 import type { AppDispatch } from "@/store/store";
@@ -124,8 +124,7 @@ useEffect(() => {
     return (
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
         <div className="text-center">
-          <LoadingSpinner size="lg" />
-          <p className="mt-4 text-slate-600">Checking authentication...</p>
+          <PageLoader message="Checking authentication..." />
         </div>
       </div>
     );
@@ -143,7 +142,7 @@ useEffect(() => {
               Welcome back
             </h1>
             <p className="text-slate-600">
-              Please sign in to your SMS Security account
+              Please sign in to your SMS Dashboard account
             </p>
           </div>
 
@@ -226,7 +225,7 @@ useEffect(() => {
             >
               {loading ? (
                 <>
-                  <LoadingSpinner size="sm" color="white" />
+                  <ButtonLoader />
                   <span className="ml-2">Signing In...</span>
                 </>
               ) : (
@@ -237,15 +236,15 @@ useEffect(() => {
 
           <div className="mt-8 text-center space-y-4">
             <p className="text-sm text-slate-500">
-              Secure authentication with HTTP-only cookies
+              Secure sms purchasing platform 
             </p>
             
             <div className="flex justify-center space-x-4 text-xs text-slate-400">
-              <span>CSRF Protected</span>
+              <span>payment secure</span>
               <span>•</span>
               <span>End-to-End Encrypted</span>
               <span>•</span>
-              <span>Session Secure</span>
+              <span>sms active numbers</span>
             </div>
           </div>
         </div>
@@ -304,7 +303,7 @@ useEffect(() => {
           {/* Bottom accent */}
           <div className="mt-8 pt-6 border-t border-blue-400/30">
             <p className="text-sm text-blue-200">
-              Trusted by developers worldwide
+              Trusted by many individual/firm worldwide
             </p>
           </div>
         </div>

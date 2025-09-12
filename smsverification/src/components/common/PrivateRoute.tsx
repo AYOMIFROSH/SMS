@@ -2,7 +2,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import useAuth from '@/hooks/useAuth';
-import LoadingSpinner from '@/components/common/LoadingSpinner';
+import {PageLoader} from '@/components/common/LoadingSpinner';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -17,7 +17,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
   if (isInitializing) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <LoadingSpinner size="lg" />
+        <PageLoader message='Setting Dashboard...' />
       </div>
     );
   }
