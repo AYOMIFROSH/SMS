@@ -1,4 +1,4 @@
-// src/components/services/PriceDisplay.tsx - Updated with real-time balance integration
+// src/components/services/PriceDisplay.tsx - Updated with 100% bonus system integration
 import React, { useState } from 'react';
 import { DollarSign, AlertCircle, CheckCircle, Info, CreditCard, Shield, Clock, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -52,9 +52,9 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
     );
   }
 
-  const remainingBalance = balance - price;
-  const serviceFee = 0; // No service fee in this case
-  const totalCost = price + serviceFee;
+  // BONUS SYSTEM: Price already includes bonus from frontend calculation
+  const totalCost = price;
+  const remainingBalance = balance - totalCost;
 
   return (
     <div className="space-y-4">
@@ -69,7 +69,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
             <h4 className="text-base font-semibold text-gray-900">Total Cost</h4>
             <div className="text-right">
               <div className="text-2xl font-bold text-gray-900">
-                ${totalCost.toFixed(4)}
+                ${totalCost.toFixed(2)}
               </div>
               <div className="text-xs text-gray-500">USD</div>
             </div>
@@ -83,7 +83,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
               )}
             </span>
             <span className={`font-medium ${canAfford ? 'text-green-600' : 'text-red-600'}`}>
-              ${balance.toFixed(4)}
+              ${balance.toFixed(2)}
             </span>
           </div>
 
@@ -127,16 +127,9 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
           
           <div className="space-y-3">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">SMS Number</span>
+              <span className="text-sm text-gray-600">Service Cost</span>
               <span className="text-sm font-medium text-gray-900">
-                ${price.toFixed(4)}
-              </span>
-            </div>
-            
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">Service Fee</span>
-              <span className="text-sm font-medium text-gray-900">
-                ${serviceFee.toFixed(4)}
+                ${totalCost.toFixed(2)}
               </span>
             </div>
             
@@ -144,7 +137,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
               <div className="flex justify-between items-center">
                 <span className="text-base font-medium text-gray-900">Total</span>
                 <span className="text-xl font-bold text-gray-900">
-                  ${totalCost.toFixed(4)}
+                  ${totalCost.toFixed(2)}
                 </span>
               </div>
             </div>
@@ -157,16 +150,9 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
         <div className="lg:hidden bg-gray-50 rounded-lg p-4">
           <div className="space-y-2">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-gray-600">SMS Number</span>
+              <span className="text-gray-600">Service Cost</span>
               <span className="font-medium text-gray-900">
-                ${price.toFixed(4)}
-              </span>
-            </div>
-            
-            <div className="flex justify-between items-center text-sm">
-              <span className="text-gray-600">Service Fee</span>
-              <span className="font-medium text-gray-900">
-                ${serviceFee.toFixed(4)}
+                ${totalCost.toFixed(4)}
               </span>
             </div>
           </div>
@@ -320,15 +306,15 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
         </h4>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="bg-gray-50 rounded p-3">
-            <div className="text-lg font-bold text-green-600">${price.toFixed(4)}</div>
+            <div className="text-lg font-bold text-green-600">${totalCost.toFixed(4)}</div>
             <div className="text-xs text-gray-500 mt-1">This Service</div>
           </div>
           <div className="bg-gray-50 rounded p-3">
-            <div className="text-lg font-bold text-gray-600">$0.02</div>
+            <div className="text-lg font-bold text-gray-600">$0.04</div>
             <div className="text-xs text-gray-500 mt-1">Average</div>
           </div>
           <div className="bg-gray-50 rounded p-3">
-            <div className="text-lg font-bold text-blue-600">85%</div>
+            <div className="text-lg font-bold text-blue-600">95%</div>
             <div className="text-xs text-gray-500 mt-1">Success Rate</div>
           </div>
         </div>

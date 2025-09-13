@@ -574,6 +574,17 @@ const useWebSocket = (
           icon: '🎉',
           duration: 4000
         });
+        
+        // Show pricing info if available
+        if (message.data.pricing) {
+          const { totalPrice } = message.data.pricing;
+          setTimeout(() => {
+            toast.success(`Total paid: $${totalPrice.toFixed(4)}`, {
+              icon: '💰',
+              duration: 3000
+            });
+          }, 1000);
+        }
         break;
 
       case 'balance_updated':

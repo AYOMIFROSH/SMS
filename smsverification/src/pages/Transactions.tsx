@@ -1,8 +1,8 @@
-// Fixed portion of Transactions.tsx - Safe number handling
+// Fixed portion of Transactions.tsx - Enhanced responsiveness for all screen sizes
 import React, { useState, useEffect } from 'react';
 import {
   CreditCard, TrendingUp, Plus, Clock, CheckCircle, XCircle,
-  RefreshCw, Eye, Loader2, DollarSign
+  RefreshCw, Eye, Loader2, DollarSign, Menu
 } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { usePayment } from '@/hooks/usePayment';
@@ -36,6 +36,7 @@ export const Transactions: React.FC = () => {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [selectedTx, setSelectedTx] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   // Load transactions when page changes
   useEffect(() => {
@@ -92,71 +93,87 @@ export const Transactions: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Transactions</h1>
-          <p className="text-gray-600">Manage your account balance and view payment history.</p>
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto">
+      {/* Header - Responsive */}
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 truncate">
+            Transactions
+          </h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">
+            Manage your account balance and view payment history.
+          </p>
         </div>
-        <button
-          onClick={() => setShowDepositModal(true)}
-          disabled={payment.loading.creating}
-          className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Funds
-        </button>
+        <div className="flex-shrink-0">
+          <button
+            onClick={() => setShowDepositModal(true)}
+            disabled={payment.loading.creating}
+            className="w-full sm:w-auto flex items-center justify-center px-4 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors touch-target"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            <span className="text-sm sm:text-base">Add Funds</span>
+          </button>
+        </div>
       </div>
 
-      {/* Balance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="card">
+      {/* Balance Cards - Enhanced responsive grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
+        <div className="card card-compact sm:card">
           <div className="flex items-center">
-            <CreditCard className="h-8 w-8 text-green-600 mr-4" />
-            <div>
-              <p className="text-sm font-medium text-gray-600">Current Balance</p>
-              <p className="text-2xl font-bold text-gray-900">
+            <div className="flex-shrink-0">
+              <CreditCard className="h-6 w-6 sm:h-8 sm:w-8 text-green-600 mr-3 sm:mr-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Current Balance</p>
+              <div className="mt-1">
                 {payment.loading.balance ? (
-                  <div className="h-8 bg-gray-200 rounded animate-pulse w-20"></div>
+                  <div className="h-6 sm:h-8 bg-gray-200 rounded animate-pulse w-16 sm:w-20"></div>
                 ) : (
-                  payment.formatAmount(currentBalance)
+                  <p className="text-lg sm:text-2xl font-bold text-gray-900 truncate">
+                    {payment.formatAmount(currentBalance)}
+                  </p>
                 )}
-              </p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="card">
+        <div className="card card-compact sm:card">
           <div className="flex items-center">
-            <TrendingUp className="h-8 w-8 text-blue-600 mr-4" />
-            <div>
-              <p className="text-sm font-medium text-gray-600">Total Deposited</p>
-              <p className="text-2xl font-bold text-gray-900">
+            <div className="flex-shrink-0">
+              <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600 mr-3 sm:mr-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Total Deposited</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 truncate">
                 {payment.formatAmount(totalDeposited)}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="card">
+        <div className="card card-compact sm:card">
           <div className="flex items-center">
-            <Clock className="h-8 w-8 text-yellow-600 mr-4" />
-            <div>
-              <p className="text-sm font-medium text-gray-600">Pending Amount</p>
-              <p className="text-2xl font-bold text-gray-900">
+            <div className="flex-shrink-0">
+              <Clock className="h-6 w-6 sm:h-8 sm:w-8 text-yellow-600 mr-3 sm:mr-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Pending Amount</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1 truncate">
                 {payment.formatAmount(pendingAmount)}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="card">
+        <div className="card card-compact sm:card">
           <div className="flex items-center">
-            <CheckCircle className="h-8 w-8 text-purple-600 mr-4" />
-            <div>
-              <p className="text-sm font-medium text-gray-600">Success Rate</p>
-              <p className="text-2xl font-bold text-gray-900">
+            <div className="flex-shrink-0">
+              <CheckCircle className="h-6 w-6 sm:h-8 sm:w-8 text-purple-600 mr-3 sm:mr-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">Success Rate</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1">
                 {totalPayments > 0
                   ? `${Math.round((successfulPayments / totalPayments) * 100)}%`
                   : '0%'
@@ -167,14 +184,14 @@ export const Transactions: React.FC = () => {
         </div>
       </div>
 
-      {/* Real-time Status Banner */}
+      {/* Real-time Status Banner - Enhanced mobile */}
       {(payment.pendingTransactions.length > 0 || payment.retryingPayments.length > 0) && (
-        <div className="card border-blue-200 bg-blue-50">
+        <div className="card border-blue-200 bg-blue-50 card-compact sm:card">
           <div className="flex items-center">
-            <Clock className="w-5 h-5 text-blue-600 mr-3 animate-pulse" />
-            <div>
-              <h4 className="font-medium text-blue-800">Real-time Payment Monitoring</h4>
-              <p className="text-sm text-blue-600">
+            <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 mr-2 sm:mr-3 animate-pulse flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h4 className="font-medium text-blue-800 text-sm sm:text-base">Real-time Payment Monitoring</h4>
+              <p className="text-xs sm:text-sm text-blue-600 mt-1">
                 {payment.pendingTransactions.length > 0 && `${payment.pendingTransactions.length} pending`}
                 {payment.pendingTransactions.length > 0 && payment.retryingPayments.length > 0 && ' • '}
                 {payment.retryingPayments.length > 0 && `${payment.retryingPayments.length} verifying`}
@@ -184,75 +201,93 @@ export const Transactions: React.FC = () => {
         </div>
       )}
 
-      {/* Simple Filters */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-4 justify-between">
-          <div className="flex gap-4">
-            <select
-              value={payment.filters.status || ''}
-              onChange={(e) => payment.updateFilters({ status: e.target.value || undefined })}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">All Status</option>
-              <option value="PENDING_UNSETTLED">Pending</option>
-              <option value="PAID_SETTLED">Completed</option>
-              <option value="FAILED">Failed</option>
-              <option value="CANCELLED">Cancelled</option>
-            </select>
-
-            <input
-              type="date"
-              value={payment.filters.startDate || ''}
-              onChange={(e) => payment.updateFilters({ startDate: e.target.value || undefined })}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
-            />
-            <input
-              type="date"
-              value={payment.filters.endDate || ''}
-              onChange={(e) => payment.updateFilters({ endDate: e.target.value || undefined })}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
+      {/* Filters - Enhanced mobile responsiveness */}
+      <div className="card card-compact sm:card">
+        {/* Mobile filters toggle */}
+        <div className="lg:hidden flex justify-between items-center mb-4">
+          <h3 className="text-sm font-medium text-gray-900">Filters</h3>
           <button
-            onClick={() => {
-              payment.refreshTransactions();
-              payment.refreshBalance();
-            }}
-            disabled={payment.loading.transactions}
-            className="flex items-center px-3 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
+            className="flex items-center px-3 py-1 text-sm text-gray-600 hover:text-gray-800 rounded-md"
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${payment.loading.transactions ? 'animate-spin' : ''}`} />
-            Refresh
+            <Menu className="w-4 h-4 mr-1" />
+            {showMobileFilters ? 'Hide' : 'Show'}
           </button>
+        </div>
+
+        {/* Filter controls */}
+        <div className={`${showMobileFilters ? 'block' : 'hidden'} lg:block`}>
+          <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 lg:justify-between lg:items-center">
+            <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 flex-1">
+              <select
+                value={payment.filters.status || ''}
+                onChange={(e) => payment.updateFilters({ status: e.target.value || undefined })}
+                className="flex-1 sm:flex-initial sm:min-w-[120px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 touch-target"
+              >
+                <option value="">All Status</option>
+                <option value="PENDING_UNSETTLED">Pending</option>
+                <option value="PAID_SETTLED">Completed</option>
+                <option value="FAILED">Failed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+
+              <input
+                type="date"
+                value={payment.filters.startDate || ''}
+                onChange={(e) => payment.updateFilters({ startDate: e.target.value || undefined })}
+                className="flex-1 sm:flex-initial border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 touch-target"
+                placeholder="Start date"
+              />
+              
+              <input
+                type="date"
+                value={payment.filters.endDate || ''}
+                onChange={(e) => payment.updateFilters({ endDate: e.target.value || undefined })}
+                className="flex-1 sm:flex-initial border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 touch-target"
+                placeholder="End date"
+              />
+            </div>
+
+            <button
+              onClick={() => {
+                payment.refreshTransactions();
+                payment.refreshBalance();
+              }}
+              disabled={payment.loading.transactions}
+              className="flex items-center justify-center px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors touch-target"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${payment.loading.transactions ? 'animate-spin' : ''}`} />
+              <span className="text-sm">Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Transactions Table */}
-      <div className="card">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-medium text-gray-900">Payment History</h3>
-          <span className="text-sm text-gray-500">{totalPayments} total</span>
+      {/* Transactions Table - Enhanced mobile layout */}
+      <div className="card card-compact sm:card">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4 sm:mb-6">
+          <h3 className="text-base sm:text-lg font-medium text-gray-900">Payment History</h3>
+          <span className="text-xs sm:text-sm text-gray-500">{totalPayments} total</span>
         </div>
 
         {payment.loading.transactions && !payment.transactions.length ? (
-          <div className="flex justify-center py-12">
+          <div className="flex justify-center py-8 sm:py-12">
             <LoadingSpinner text="Loading transactions..." />
           </div>
         ) : !payment.transactions.length ? (
-          <div className="text-center py-12">
-            <CreditCard className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-            <h4 className="text-lg font-medium text-gray-900 mb-2">No transactions yet</h4>
-            <p className="text-gray-500 mb-6">Your payment history will appear here.</p>
+          <div className="text-center py-8 sm:py-12">
+            <CreditCard className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mb-3 sm:mb-4" />
+            <h4 className="text-base sm:text-lg font-medium text-gray-900 mb-2">No transactions yet</h4>
+            <p className="text-sm sm:text-base text-gray-500 mb-4 sm:mb-6">Your payment history will appear here.</p>
             <button
               onClick={() => setShowDepositModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm sm:text-base touch-target"
             >
               Make Your First Deposit
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {payment.transactions.map((tx) => {
               const statusDisplay = payment.getStatusDisplay(tx.status);
               const isPending = payment.pendingTransactions.includes(tx.tx_ref);
@@ -264,55 +299,65 @@ export const Transactions: React.FC = () => {
               const usdEquivalent = safeNumber(tx.usd_equivalent);
 
               return (
-                <div key={tx.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-10 h-10 rounded-full border flex items-center justify-center ${statusDisplay.bgColor}`}>
-                        {statusDisplay.icon === 'check-circle' && <CheckCircle className="w-4 h-4" />}
-                        {statusDisplay.icon === 'clock' && <Clock className="w-4 h-4" />}
-                        {statusDisplay.icon === 'x-circle' && <XCircle className="w-4 h-4" />}
+                <div key={tx.id} className="border border-gray-200 rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition-colors">
+                  {/* Mobile-first layout */}
+                  <div className="flex items-start justify-between gap-3">
+                    {/* Left side - Icon and details */}
+                    <div className="flex items-start space-x-3 min-w-0 flex-1">
+                      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full border flex items-center justify-center flex-shrink-0 ${statusDisplay.bgColor}`}>
+                        {statusDisplay.icon === 'check-circle' && <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" />}
+                        {statusDisplay.icon === 'clock' && <Clock className="w-3 h-3 sm:w-4 sm:h-4" />}
+                        {statusDisplay.icon === 'x-circle' && <XCircle className="w-3 h-3 sm:w-4 sm:h-4" />}
                       </div>
 
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-medium text-gray-900">Flutterwave Deposit</h4>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium border ${statusDisplay.bgColor} ${statusDisplay.color}`}>
-                            {statusDisplay.text}
-                          </span>
-                          {isPending && (
-                            <span className="px-2 py-1 rounded-full text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200">
-                              <div className="w-2 h-2 bg-blue-500 rounded-full inline-block mr-1 animate-pulse"></div>
-                              Live
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
+                          <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
+                            Flutterwave Deposit
+                          </h4>
+                          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${statusDisplay.bgColor} ${statusDisplay.color}`}>
+                              {statusDisplay.text}
                             </span>
-                          )}
+                            {isPending && (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200">
+                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full inline-block mr-1 animate-pulse"></div>
+                                Live
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-500 space-y-1">
-                          <div>Ref: {tx.tx_ref}</div>
+                        
+                        {/* Transaction details - stacked on mobile */}
+                        <div className="text-xs sm:text-sm text-gray-500 space-y-1">
+                          <div className="truncate">Ref: {tx.tx_ref}</div>
                           <div>Created: {new Date(tx.created_at).toLocaleDateString()}</div>
                           {fxRate > 0 && <div>Rate: 1 USD = ₦{safeFormatRate(fxRate)}</div>}
                         </div>
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <div className="text-lg font-semibold text-gray-900">
+                    {/* Right side - Amount */}
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-base sm:text-lg font-semibold text-gray-900">
                         {tx.formatted_ngn || `₦${ngnAmount.toFixed(2)}`}
                       </div>
-                      <div className="text-sm text-green-600">
+                      <div className="text-xs sm:text-sm text-green-600">
                         ≈ {tx.formatted_usd || `$${usdEquivalent.toFixed(4)}`}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-100">
-                    <div className="text-sm text-gray-500">
+                  {/* Action buttons - responsive layout */}
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mt-4 pt-3 border-t border-gray-100">
+                    <div className="text-xs sm:text-sm text-gray-500 truncate">
                       {tx.flw_ref && `FLW: ${tx.flw_ref}`}
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-end">
                       <button
                         onClick={() => setSelectedTx(tx)}
-                        className="flex items-center px-3 py-1 text-gray-600 hover:text-gray-800 text-sm"
+                        className="flex items-center px-3 py-1.5 text-gray-600 hover:text-gray-800 text-xs sm:text-sm touch-target rounded hover:bg-gray-100"
                       >
                         <Eye className="w-3 h-3 mr-1" />
                         Details
@@ -323,7 +368,7 @@ export const Transactions: React.FC = () => {
                           <button
                             onClick={() => payment.manualVerifyTransaction(tx.tx_ref)}
                             disabled={isRetrying}
-                            className="flex items-center px-3 py-1 text-blue-600 hover:text-blue-700 text-sm disabled:opacity-50"
+                            className="flex items-center px-3 py-1.5 text-blue-600 hover:text-blue-700 text-xs sm:text-sm disabled:opacity-50 touch-target rounded hover:bg-blue-50"
                           >
                             {isRetrying ? (
                               <Loader2 className="w-3 h-3 animate-spin mr-1" />
@@ -335,46 +380,47 @@ export const Transactions: React.FC = () => {
 
                           <button
                             onClick={() => paymentAPI.openPaymentLink(tx.payment_link)}
-                            className="flex items-center px-3 py-1 text-green-600 hover:text-green-700 text-sm"
+                            className="flex items-center px-3 py-1.5 text-green-600 hover:text-green-700 text-xs sm:text-sm touch-target rounded hover:bg-green-50"
                           >
                             <CreditCard className="w-3 h-3 mr-1" />
-                            Reopen Checkout
+                            <span className="hidden sm:inline">Reopen Checkout</span>
+                            <span className="sm:hidden">Reopen</span>
                           </button>
 
                           <button
                             onClick={() => payment.cancelPayment(tx.tx_ref)}
-                            className="flex items-center px-3 py-1 text-red-600 hover:text-red-700 text-sm"
+                            className="flex items-center px-3 py-1.5 text-red-600 hover:text-red-700 text-xs sm:text-sm touch-target rounded hover:bg-red-50"
                           >
                             <XCircle className="w-3 h-3 mr-1" />
                             Cancel
                           </button>
                         </>
                       )}
-
                     </div>
                   </div>
                 </div>
               );
             })}
 
-            {/* Pagination */}
+            {/* Pagination - Enhanced mobile */}
             {payment.pagination.totalPages > 1 && (
-              <div className="flex justify-between items-center pt-6 border-t">
-                <div className="text-sm text-gray-500">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-4 sm:pt-6 border-t">
+                <div className="text-xs sm:text-sm text-gray-500 text-center sm:text-left">
                   Page {payment.pagination.page} of {payment.pagination.totalPages}
+                  <span className="hidden sm:inline"> ({payment.pagination.totalRecords} total)</span>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 justify-center">
                   <button
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1 || payment.loading.transactions}
-                    className="px-3 py-2 text-sm border rounded disabled:opacity-50"
+                    className="px-3 py-2 text-xs sm:text-sm border rounded disabled:opacity-50 touch-target hover:bg-gray-50"
                   >
                     Previous
                   </button>
                   <button
                     onClick={() => setCurrentPage(p => Math.min(payment.pagination.totalPages, p + 1))}
                     disabled={currentPage === payment.pagination.totalPages || payment.loading.transactions}
-                    className="px-3 py-2 text-sm border rounded disabled:opacity-50"
+                    className="px-3 py-2 text-xs sm:text-sm border rounded disabled:opacity-50 touch-target hover:bg-gray-50"
                   >
                     Next
                   </button>
@@ -396,21 +442,22 @@ export const Transactions: React.FC = () => {
         />
       )}
 
-      {/* Transaction Details Modal - FIXED: Safe handling of numeric values */}
+      {/* Transaction Details Modal - Enhanced mobile */}
       {selectedTx && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-lg w-full">
-            <div className="p-6 border-b">
+          <div className="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-4 sm:p-6 border-b sticky top-0 bg-white">
               <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold">Transaction Details</h2>
-                <button onClick={() => setSelectedTx(null)}>
-                  <XCircle className="w-6 h-6 text-gray-400" />
+                <h2 className="text-lg sm:text-xl font-semibold">Transaction Details</h2>
+                <button onClick={() => setSelectedTx(null)} className="touch-target">
+                  <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400 hover:text-gray-600" />
                 </button>
               </div>
             </div>
-            <div className="p-6">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><strong>Reference:</strong><br />{selectedTx.tx_ref}</div>
+            
+            <div className="p-4 sm:p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div><strong>Reference:</strong><br /><span className="text-xs break-all">{selectedTx.tx_ref}</span></div>
                 <div><strong>Status:</strong><br />{payment.getStatusDisplay(selectedTx.status).text}</div>
                 <div>
                   <strong>NGN Amount:</strong><br />
@@ -428,21 +475,22 @@ export const Transactions: React.FC = () => {
                 {selectedTx.created_at && (
                   <div>
                     <strong>Created:</strong><br />
-                    {new Date(selectedTx.created_at).toLocaleString()}
+                    <span className="text-xs">{new Date(selectedTx.created_at).toLocaleString()}</span>
                   </div>
                 )}
                 {selectedTx.paid_at && (
                   <div>
                     <strong>Paid:</strong><br />
-                    {new Date(selectedTx.paid_at).toLocaleString()}
+                    <span className="text-xs">{new Date(selectedTx.paid_at).toLocaleString()}</span>
                   </div>
                 )}
               </div>
             </div>
-            <div className="p-6 border-t bg-gray-50">
+            
+            <div className="p-4 sm:p-6 border-t bg-gray-50 sticky bottom-0">
               <button
                 onClick={() => setSelectedTx(null)}
-                className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg"
+                className="w-full px-4 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg touch-target transition-colors"
               >
                 Close
               </button>
@@ -454,7 +502,7 @@ export const Transactions: React.FC = () => {
   );
 };
 
-// FIXED: DepositModal Component with better error handling and safe number handling
+// FIXED: DepositModal Component with enhanced mobile responsiveness
 interface DepositModalProps {
   onClose: () => void;
   onSuccess: (txRef: string) => void;
@@ -558,22 +606,22 @@ const DepositModal: React.FC<DepositModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-md w-full">
-        <div className="p-6 border-b">
+      <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-4 sm:p-6 border-b sticky top-0 bg-white">
           <div className="flex justify-between items-center">
-            <h2 className="text-ml font-semibold">Add Funds</h2>
-            <button onClick={onClose} disabled={loading}>
-              <XCircle className="w-6 h-6 text-gray-400 hover:text-gray-600" />
+            <h2 className="text-lg sm:text-xl font-semibold">Add Funds</h2>
+            <button onClick={onClose} disabled={loading} className="touch-target">
+              <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400 hover:text-gray-600" />
             </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
           {/* Error Display */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <div className="flex items-center">
-                <XCircle className="w-4 h-4 text-red-600 mr-2" />
+                <XCircle className="w-4 h-4 text-red-600 mr-2 flex-shrink-0" />
                 <span className="text-sm text-red-800">{error}</span>
               </div>
             </div>
@@ -598,7 +646,7 @@ const DepositModal: React.FC<DepositModalProps> = ({
               max="1000000"
               required
               disabled={loading}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 touch-target"
               placeholder="Enter amount in NGN"
             />
             <p className="text-xs text-gray-500 mt-1">Min: ₦100 | Max: ₦1,000,000</p>
@@ -608,13 +656,13 @@ const DepositModal: React.FC<DepositModalProps> = ({
           {amount && parseFloat(amount) >= 100 && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <div className="flex items-center mb-2">
-                <DollarSign className="w-4 h-4 text-blue-600 mr-2" />
+                <DollarSign className="w-4 h-4 text-blue-600 mr-2 flex-shrink-0" />
                 <span className="text-sm font-medium text-blue-800">USD Equivalent</span>
               </div>
               <div className="text-sm text-blue-700">
                 {fxLoading ? (
                   <div className="flex items-center">
-                    <Loader2 className="w-3 h-3 animate-spin mr-2" />
+                    <Loader2 className="w-3 h-3 animate-spin mr-2 flex-shrink-0" />
                     Calculating exchange rate...
                   </div>
                 ) : fxPreview ? (
@@ -638,7 +686,7 @@ const DepositModal: React.FC<DepositModalProps> = ({
               value={paymentMethod}
               onChange={(e) => setPaymentMethod(e.target.value as any)}
               disabled={loading}
-              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 touch-target"
             >
               <option value="card">Debit/Credit Card</option>
               <option value="bank">Bank Transfer</option>
@@ -647,41 +695,40 @@ const DepositModal: React.FC<DepositModalProps> = ({
             </select>
           </div>
 
-          <div className="flex gap-3 pt-4 justify-end">
+          <div className="flex flex-col sm:flex-row gap-3 pt-4">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="px-3 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50"
+              className="flex-1 sm:flex-initial px-4 py-2.5 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 touch-target transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !amount || !fxPreview || fxLoading || parseFloat(amount) < 100}
-              className="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 flex items-center justify-center"
+              className="flex-1 sm:flex-initial px-4 py-2.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 flex items-center justify-center touch-target transition-colors"
             >
               {loading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
                   Creating...
                 </>
               ) : (
                 <>
-                  <Plus className="w-4 h-4 mr-1" />
+                  <Plus className="w-4 h-4 mr-2" />
                   Proceed
                 </>
               )}
             </button>
           </div>
 
-
           {/* Help text */}
-          <div className="text-xs text-gray-500 text-center">
+          <div className="text-xs text-gray-500 text-center px-4">
             You'll be redirected to Flutterwave secure checkout to complete your payment.
           </div>
         </form>
       </div>
     </div>
   );
-};
+}

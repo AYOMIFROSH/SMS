@@ -168,13 +168,20 @@ const BuyNumber: React.FC = () => {
     const servicePrices = countryPrices[selectedService];
     if (!servicePrices) return null;
     
+    let realPrice = 0;
+    
     if (selectedOperator && servicePrices[selectedOperator]) {
-      return Number(servicePrices[selectedOperator].cost || servicePrices[selectedOperator] || 0);
+      const operatorPrice = servicePrices[selectedOperator];
+      realPrice = Number(typeof operatorPrice === 'object' ? 
+        operatorPrice.cost || operatorPrice.price || 0 :
+        operatorPrice || 0);
+    } else {
+      realPrice = Number(servicePrices.cost || servicePrices || 0);
     }
     
-    return Number(servicePrices.cost || servicePrices || 0);
+    // BONUS SYSTEM: Return total price (real + 100% bonus)
+    return realPrice * 2; // User sees and pays double the real price
   };
-
   const canAfford = () => {
     const price = getCurrentPrice();
     const currentBalance = payment.balance?.balance ?? 0;
