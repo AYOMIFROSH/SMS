@@ -29,8 +29,7 @@ const OperatorSelector: React.FC<OperatorSelectorProps> = ({
   if (loading) {
     return (
       <div className="p-8 text-center">
-        <LoadingSpinner size="lg" />
-        <p className="mt-4 text-sm text-gray-500">Loading operators...</p>
+        <LoadingSpinner text='Loading operators...' />
       </div>
     );
   }

@@ -13,6 +13,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import LoadingSpinner from '@/components/common/LoadingSpinner';
 
 export const History: React.FC = () => {
     useDocumentTitle("SMS Verification History");
@@ -161,8 +162,7 @@ export const History: React.FC = () => {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         {loading ? (
           <div className="p-8 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-            <p className="mt-2 text-sm text-gray-500">Loading history...</p>
+            <LoadingSpinner text='Loading history...' />
           </div>
         ) : history.length === 0 ? (
           <div className="p-8 text-center">

@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { Search, Star, Smartphone } from 'lucide-react';
 import { Service } from '@/types';
+import LoadingSpinner from '@/components/common/LoadingSpinner'
 
 interface ServiceGridProps {
   services: Service[];
@@ -58,8 +59,7 @@ const ServiceGrid: React.FC<ServiceGridProps> = ({
   if (loading) {
     return (
       <div className="p-8 text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
-        <p className="mt-4 text-sm text-gray-500">Loading services...</p>
+        <LoadingSpinner text="Loading services..." />
       </div>
     );
   }

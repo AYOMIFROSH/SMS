@@ -1,7 +1,8 @@
 // src/components/services/CountrySelector.tsx - FIXED: SMS-Activate Country Code System
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, Loader2, Globe, Filter, X } from 'lucide-react';
+import { Search, MapPin, Globe, Filter, X } from 'lucide-react';
 import { Country } from '@/types';
+import LoadingSpinner from '../common/LoadingSpinner';
 
 interface CountrySelectorProps {
   countries: Country[];
@@ -114,8 +115,7 @@ const CountrySelector: React.FC<CountrySelectorProps> = ({
       <div className="p-4 lg:p-6">
         <div className="flex items-center justify-center py-16 lg:py-20">
           <div className="text-center">
-            <Loader2 className="h-8 w-8 lg:h-10 lg:w-10 animate-spin text-gray-400 mx-auto" />
-            <span className="block mt-3 text-sm lg:text-base text-gray-600">Loading countries...</span>
+            <LoadingSpinner text="Loading countries.." />
           </div>
         </div>
       </div>

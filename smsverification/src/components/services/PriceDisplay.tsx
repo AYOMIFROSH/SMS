@@ -27,8 +27,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
       <div className="space-y-4">
         <div className="bg-gray-50 rounded-lg p-4">
           <div className="flex items-center justify-center py-6">
-            <LoadingSpinner size="sm" />
-            <span className="ml-2 text-sm text-gray-600">Loading price information...</span>
+            <LoadingSpinner text='Loading price information...' />
           </div>
         </div>
       </div>
