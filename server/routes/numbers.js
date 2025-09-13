@@ -1,8 +1,9 @@
-// routes/numbers.js - ENHANCED WITH SUBSCRIPTIONS AND COMPLETE SMS MANAGEMENT
+// routes/numbers.js - ENHANCED WITH 100% BONUS SYSTEM - COMPLETE VERSION
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { getPool } = require('../Config/database');
 const smsActivateService = require('../services/smsActivateServices');
+const webSocketService = require('../services/webhookService');
 const { 
   rateLimiters, 
   validationRules, 
@@ -15,7 +16,7 @@ const router = express.Router();
 // Apply rate limiting
 router.use(rateLimiters.sms);
 
-// Enhanced number purchase with comprehensive validation and operator support
+// UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
 router.post('/purchase', 
   authenticateToken,
   [
@@ -42,7 +43,7 @@ router.post('/purchase',
     const userId = req.user.id;
 
     try {
-      logger.info('📱 Number purchase request:', { 
+      logger.info('📱 Number purchase request with BONUS system:', { 
         userId, 
         service, 
         country, 
@@ -50,61 +51,92 @@ router.post('/purchase',
         maxPrice 
       });
 
-      // Check user balance first
-      const pool = getPool();
-      const [userBalance] = await pool.execute(
-        'SELECT balance FROM sms_user_accounts WHERE user_id = ?',
-        [userId]
-      );
-
-      if (!userBalance.length) {
-        return res.status(404).json({ 
-          error: 'SMS account not found',
-          code: 'ACCOUNT_NOT_FOUND'
-        });
-      }
-
-      // Get current price for the service
+      // Get current price for the service from SMS-Activate API
       const prices = await smsActivateService.getPrices(country, service);
-      const servicePrice = prices?.[country]?.[service]?.cost || 0;
+      const realPrice = prices?.[country]?.[service]?.cost || 0;
 
-      if (servicePrice === 0) {
+      if (realPrice === 0) {
         return res.status(400).json({ 
           error: 'Service not available in selected country',
           code: 'SERVICE_UNAVAILABLE'
         });
       }
 
-      if (maxPrice && servicePrice > maxPrice) {
+      // BONUS SYSTEM: Calculate total price (real price + 100% bonus)
+      const bonusAmount = realPrice; // 100% bonus = same as real price
+      const totalPrice = realPrice + bonusAmount; // User pays double
+
+      logger.info('💰 Price calculation with bonus:', {
+        userId,
+        realPrice,
+        bonusAmount,
+        totalPrice,
+        service,
+        country
+      });
+
+      // Check if total price exceeds user's maxPrice
+      if (maxPrice && totalPrice > maxPrice) {
         return res.status(400).json({ 
-          error: `Price ${servicePrice} exceeds maximum ${maxPrice}`,
+          error: `Total price ${totalPrice.toFixed(4)} exceeds maximum ${maxPrice.toFixed(4)}`,
           code: 'PRICE_EXCEEDED',
-          currentPrice: servicePrice,
+          realPrice: realPrice,
+          bonusAmount: bonusAmount,
+          totalPrice: totalPrice,
           maxPrice: maxPrice
         });
       }
 
+      // Check user balance in user_demo_balances table
+      const pool = getPool();
+      
+      // Get or create balance record
+      await pool.execute(`
+        INSERT IGNORE INTO user_demo_balances (user_id, balance, total_deposited, total_spent)
+        VALUES (?, 0, 0, 0)
+      `, [userId]);
+
+      const [userBalance] = await pool.execute(
+        'SELECT balance FROM user_demo_balances WHERE user_id = ?',
+        [userId]
+      );
+
       const currentBalance = parseFloat(userBalance[0].balance || 0);
-      if (currentBalance < servicePrice) {
+
+      // CRITICAL: Check if user has enough balance for TOTAL price (real + bonus)
+      if (currentBalance < totalPrice) {
         return res.status(400).json({ 
-          error: 'Insufficient balance',
+          error: 'Insufficient balance for purchase including bonus',
           code: 'INSUFFICIENT_BALANCE',
-          required: servicePrice,
+          required: totalPrice,
           current: currentBalance,
-          shortfall: servicePrice - currentBalance
+          shortfall: totalPrice - currentBalance,
+          breakdown: {
+            realPrice: realPrice,
+            bonusAmount: bonusAmount,
+            totalPrice: totalPrice
+          }
         });
       }
 
-      // Start database transaction
+      // Start database transaction for atomic operation
       await pool.execute('START TRANSACTION');
 
       try {
-        // Purchase number from SMS-Activate
+        // STEP 1: Purchase number from SMS-Activate using REAL price only
+        logger.info('🔄 Purchasing from SMS-Activate API with real price:', {
+          userId,
+          service,
+          country,
+          operator,
+          realPrice
+        });
+
         const numberData = await smsActivateService.getNumber(
           service,
           country,
           operator,
-          maxPrice
+          realPrice // Use real price for API call
         );
 
         const { id: activationId, number } = numberData;
@@ -113,12 +145,12 @@ router.post('/purchase',
         const expiryDate = new Date();
         expiryDate.setMinutes(expiryDate.getMinutes() + 20);
 
-        // Save purchase to database
+        // STEP 2: Save purchase to database with total price user paid
         const [purchaseResult] = await pool.execute(
           `INSERT INTO number_purchases 
            (user_id, activation_id, phone_number, country_code, service_code, 
-            service_name, price, status, expiry_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?)`,
+            service_name, price, status, expiry_date, purchase_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, NOW())`,
           [
             userId, 
             activationId, 
@@ -126,62 +158,88 @@ router.post('/purchase',
             country, 
             service,
             service.toUpperCase(), // Service name
-            servicePrice,
+            totalPrice, // Store total price user paid (including bonus)
             expiryDate
           ]
         );
 
-        // Deduct balance
-        await pool.execute(
-          'UPDATE sms_user_accounts SET balance = balance - ? WHERE user_id = ?',
-          [servicePrice, userId]
-        );
-
-        // Update user statistics
-        await pool.execute(
-          `UPDATE sms_user_accounts 
-           SET total_numbers_purchased = total_numbers_purchased + 1,
-               total_spent = total_spent + ?
+        // STEP 3: Deduct TOTAL price from user balance (real + bonus)
+        const [balanceUpdateResult] = await pool.execute(
+          `UPDATE user_demo_balances 
+           SET balance = balance - ?, 
+               total_spent = total_spent + ?,
+               last_transaction_at = NOW()
            WHERE user_id = ?`,
-          [servicePrice, userId]
+          [totalPrice, totalPrice, userId]
         );
 
-        // Add transaction record
+        if (balanceUpdateResult.affectedRows === 0) {
+          throw new Error('Failed to update user balance');
+        }
+
+        // Get new balance for notifications
+        const [newBalance] = await pool.execute(
+          'SELECT balance FROM user_demo_balances WHERE user_id = ?',
+          [userId]
+        );
+
+        const remainingBalance = parseFloat(newBalance[0].balance);
+
+        // STEP 4: Add detailed transaction record
         await pool.execute(
           `INSERT INTO transactions 
-           (user_id, transaction_type, amount, reference_id, description, status)
-           VALUES (?, 'purchase', ?, ?, ?, 'completed')`,
+           (user_id, transaction_type, amount, balance_before, balance_after, 
+            reference_id, description, status, created_at)
+           VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'completed', NOW())`,
           [
             userId, 
-            servicePrice, 
+            totalPrice,
+            currentBalance,
+            remainingBalance,
             activationId, 
-            `Number purchase for ${service.toUpperCase()} (${country})`
+            `SMS Number Purchase: ${service.toUpperCase()} (${country}) - Real: $${realPrice.toFixed(4)}, Bonus: $${bonusAmount.toFixed(4)}, Total: $${totalPrice.toFixed(4)}`
           ]
         );
 
         await pool.execute('COMMIT');
 
-        // Send WebSocket notification
-        if (req.app.locals.wsService) {
-          req.app.locals.wsService.notifyNumberPurchased(userId, {
-            activationId,
-            number,
-            service,
-            country,
-            operator,
-            price: servicePrice,
-            purchaseId: purchaseResult.insertId,
-            expiryDate
+        // STEP 5: Send real-time WebSocket notifications
+        try {
+          // Notify successful purchase
+          webSocketService.sendToUser(userId, {
+            type: 'number_purchased',
+            data: {
+              activationId,
+              number,
+              service,
+              country,
+              operator,
+              realPrice,
+              bonusAmount,
+              totalPrice,
+              purchaseId: purchaseResult.insertId,
+              expiryDate,
+              remainingBalance
+            }
           });
+
+          // Notify balance update
+          webSocketService.notifyBalanceUpdated(userId, remainingBalance, -totalPrice);
+
+        } catch (wsError) {
+          logger.warn('WebSocket notification failed (non-critical):', wsError.message);
         }
 
-        logger.info('✅ Number purchased successfully:', { 
+        logger.info('✅ Number purchased successfully with bonus system:', { 
           userId, 
           activationId, 
           number,
           service,
           country,
-          price: servicePrice
+          realPrice,
+          bonusAmount,
+          totalPrice,
+          remainingBalance
         });
 
         res.json({
@@ -189,15 +247,24 @@ router.post('/purchase',
           data: {
             activationId,
             number,
-            price: servicePrice,
             purchaseId: purchaseResult.insertId,
             service,
             country,
             operator,
+            pricing: {
+              realPrice,
+              bonusAmount,
+              totalPrice
+            },
             status: 'waiting',
             expiryDate,
-            remainingBalance: currentBalance - servicePrice
-          }
+            balance: {
+              previous: currentBalance,
+              current: remainingBalance,
+              deducted: totalPrice
+            }
+          },
+          message: 'Number purchased successfully!'
         });
 
       } catch (purchaseError) {
@@ -206,12 +273,13 @@ router.post('/purchase',
       }
 
     } catch (error) {
-      logger.error('❌ Purchase error:', {
+      logger.error('❌ Purchase error with bonus system:', {
         error: error.message,
         userId,
         service,
         country,
-        operator
+        operator,
+        stack: error.stack
       });
 
       // Handle specific SMS-Activate errors
@@ -284,14 +352,16 @@ router.get('/active',
               number.received_at = new Date();
 
               // Send WebSocket notification
-              if (req.app.locals.wsService) {
-                req.app.locals.wsService.notifySmsReceived(userId, {
+              webSocketService.sendToUser(userId, {
+                type: 'sms_received',
+                data: {
                   activationId: number.activation_id,
                   code: statusResult.code,
-                  text: statusResult.text,
-                  purchaseId: number.id
-                });
-              }
+                  smsText: statusResult.text,
+                  purchaseId: number.id,
+                  phoneNumber: number.phone_number
+                }
+              });
 
               logger.info('📨 SMS received:', { 
                 userId, 
@@ -309,9 +379,14 @@ router.get('/active',
               number.status = 'expired';
 
               // Notify about expiry
-              if (req.app.locals.wsService) {
-                req.app.locals.wsService.notifyNumberExpired(userId, number.activation_id);
-              }
+              webSocketService.sendToUser(userId, {
+                type: 'number_expired',
+                data: {
+                  activationId: number.activation_id,
+                  phoneNumber: number.phone_number,
+                  purchaseId: number.id
+                }
+              });
             }
 
           } catch (statusError) {
@@ -359,7 +434,11 @@ router.get('/active',
 // Enhanced status check for specific number
 router.get('/:id/status', 
   authenticateToken,
-  validationRules.activationId,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { id } = req.params;
@@ -401,6 +480,18 @@ router.get('/:id/status',
             number.sms_text = statusResult.text;
             number.status = 'received';
             number.received_at = new Date();
+
+            // Send WebSocket notification
+            webSocketService.sendToUser(userId, {
+              type: 'sms_received',
+              data: {
+                activationId: number.activation_id,
+                code: statusResult.code,
+                smsText: statusResult.text,
+                purchaseId: number.id,
+                phoneNumber: number.phone_number
+              }
+            });
           }
         } catch (statusError) {
           logger.error('Status check error:', statusError);
@@ -429,7 +520,11 @@ router.get('/:id/status',
 // Enhanced cancel number with proper status handling
 router.post('/:id/cancel', 
   authenticateToken,
-  validationRules.activationId,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { id } = req.params;
@@ -479,28 +574,52 @@ router.post('/:id/cancel',
           ['cancelled', id]
         );
 
-        // Add refund transaction if applicable (partial refund logic)
+        // Calculate refund (partial refund logic - user gets refund of total amount paid)
         const refundAmount = calculateRefund(number);
         if (refundAmount > 0) {
+          // Update balance
           await pool.execute(
-            'UPDATE sms_user_accounts SET balance = balance + ? WHERE user_id = ?',
+            `UPDATE user_demo_balances 
+             SET balance = balance + ?,
+                 last_transaction_at = NOW()
+             WHERE user_id = ?`,
             [refundAmount, userId]
           );
 
+          // Add refund transaction
           await pool.execute(
             `INSERT INTO transactions 
-             (user_id, transaction_type, amount, reference_id, description, status)
-             VALUES (?, 'refund', ?, ?, ?, 'completed')`,
+             (user_id, transaction_type, amount, reference_id, description, status, created_at)
+             VALUES (?, 'refund', ?, ?, ?, 'completed', NOW())`,
             [
               userId, 
               refundAmount, 
               number.activation_id, 
-              `Refund for cancelled number ${number.phone_number}`
+              `Partial refund for cancelled number ${number.phone_number}`
             ]
           );
         }
 
         await pool.execute('COMMIT');
+
+        // Send WebSocket notification
+        webSocketService.sendToUser(userId, {
+          type: 'number_cancelled',
+          data: {
+            activationId: number.activation_id,
+            phoneNumber: number.phone_number,
+            refundAmount
+          }
+        });
+
+        if (refundAmount > 0) {
+          const [newBalance] = await pool.execute(
+            'SELECT balance FROM user_demo_balances WHERE user_id = ?',
+            [userId]
+          );
+          
+          webSocketService.notifyBalanceUpdated(userId, newBalance[0].balance, refundAmount);
+        }
 
         logger.info('✅ Number cancelled successfully:', { 
           userId, 
@@ -532,7 +651,11 @@ router.post('/:id/cancel',
 // Mark number as completed/used
 router.post('/:id/complete', 
   authenticateToken,
-  validationRules.activationId,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { id } = req.params;
@@ -577,6 +700,16 @@ router.post('/:id/complete',
         ['used', id]
       );
 
+      // Send WebSocket notification
+      webSocketService.sendToUser(userId, {
+        type: 'number_completed',
+        data: {
+          activationId: number.activation_id,
+          phoneNumber: number.phone_number,
+          purchaseId: id
+        }
+      });
+
       logger.info('✅ Number completed successfully:', { 
         userId, 
         activationId: number.activation_id 
@@ -600,7 +733,11 @@ router.post('/:id/complete',
 // NEW: Request retry for SMS
 router.post('/:id/retry', 
   authenticateToken,
-  validationRules.activationId,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { id } = req.params;
@@ -664,7 +801,11 @@ router.post('/:id/retry',
 // NEW: Get full SMS text
 router.get('/:id/full-sms', 
   authenticateToken,
-  validationRules.activationId,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { id } = req.params;
@@ -736,7 +877,14 @@ router.get('/:id/full-sms',
 router.get('/history', 
   authenticateToken,
   [
-    ...validationRules.pagination,
+    require('express-validator').query('page')
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage('Page must be positive integer'),
+    require('express-validator').query('limit')
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage('Limit must be 1-100'),
     require('express-validator').query('service')
       .optional()
       .matches(/^[a-zA-Z0-9_-]+$/)
@@ -942,7 +1090,7 @@ router.post('/subscriptions/buy',
       // Check user balance
       const pool = getPool();
       const [userBalance] = await pool.execute(
-        'SELECT balance FROM sms_user_accounts WHERE user_id = ?',
+        'SELECT balance FROM user_demo_balances WHERE user_id = ?',
         [userId]
       );
 
@@ -1023,15 +1171,19 @@ router.post('/subscriptions/buy',
 
         // Deduct balance
         await pool.execute(
-          'UPDATE sms_user_accounts SET balance = balance - ? WHERE user_id = ?',
-          [subscriptionPrice, userId]
+          `UPDATE user_demo_balances 
+           SET balance = balance - ?,
+               total_spent = total_spent + ?,
+               last_transaction_at = NOW()
+           WHERE user_id = ?`,
+          [subscriptionPrice, subscriptionPrice, userId]
         );
 
         // Add transaction record
         await pool.execute(
           `INSERT INTO transactions 
-           (user_id, transaction_type, amount, reference_id, description, status)
-           VALUES (?, 'purchase', ?, ?, ?, 'completed')`,
+           (user_id, transaction_type, amount, reference_id, description, status, created_at)
+           VALUES (?, 'purchase', ?, ?, ?, 'completed', NOW())`,
           [
             userId,
             subscriptionPrice,
@@ -1084,7 +1236,20 @@ router.post('/subscriptions/buy',
 // Get user subscriptions
 router.get('/subscriptions', 
   authenticateToken,
-  validationRules.pagination,
+  [
+    require('express-validator').query('page')
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage('Page must be positive integer'),
+    require('express-validator').query('limit')
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage('Limit must be 1-100'),
+    require('express-validator').query('status')
+      .optional()
+      .isIn(['active', 'cancelled', 'expired'])
+      .withMessage('Invalid status')
+  ],
   handleValidationErrors,
   async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
@@ -1255,8 +1420,7 @@ function calculateRefund(number) {
   if (elapsed >= totalLifetime) return 0; // No refund if time elapsed
 
   const remainingFraction = (totalLifetime - elapsed) / totalLifetime;
-  return parseFloat((number.price * remainingFraction).toFixed(2));
+  return parseFloat((number.price * remainingFraction * 0.5).toFixed(4)); // 50% refund rate
 }
-
 
 module.exports = router;

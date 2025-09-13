@@ -8,19 +8,6 @@ const { getPool } = require('../Config/database');
 const router = express.Router();
 
 // Raw body parser middleware for webhook signature validation
-const getRawBody = (req, res, next) => {
-  req.rawBody = '';
-  req.setEncoding('utf8');
-
-  req.on('data', (chunk) => {
-    req.rawBody += chunk;
-  });
-
-  req.on('end', () => {
-    next();
-  });
-};
-
 // Webhook-specific rate limiter (more lenient than API)
 const webhookLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
