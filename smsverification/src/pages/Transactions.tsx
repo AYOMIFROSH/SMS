@@ -313,7 +313,7 @@ export const Transactions: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 mb-2">
                           <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">
-                            Flutterwave Deposit
+                            Fizzbuzz Deposit
                           </h4>
                           <div className="flex flex-wrap items-center gap-1 sm:gap-2">
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${statusDisplay.bgColor} ${statusDisplay.color}`}>
