@@ -306,7 +306,7 @@ const PriceDisplay: React.FC<PriceDisplayProps> = ({
         </h4>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="bg-gray-50 rounded p-3">
-            <div className="text-lg font-bold text-green-600">${totalCost.toFixed(4)}</div>
+            <div className="text-lg font-bold text-green-600">${totalCost.toFixed(2)}</div>
             <div className="text-xs text-gray-500 mt-1">This Service</div>
           </div>
           <div className="bg-gray-50 rounded p-3">
