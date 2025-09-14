@@ -37,6 +37,35 @@ const refreshLimiter = rateLimit({
   skipSuccessfulRequests: true
 });
 
+const registrationValidation = [
+  body('firstname')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .matches(/^[a-zA-Z\s]+$/)
+    .withMessage('First name must be 2-50 characters and contain only letters'),
+  body('lastname')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .matches(/^[a-zA-Z\s]+$/)
+    .withMessage('Last name must be 2-50 characters and contain only letters'),
+  body('username')
+    .trim()
+    .isLength({ min: 3, max: 30 })
+    .matches(/^[a-zA-Z0-9._-]+$/)
+    .withMessage('Username must be 3-30 characters and contain only letters, numbers, dots, underscores, and hyphens'),
+  body('email')
+    .trim()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email address'),
+  body('password')
+    .isLength({ min: 6, max: 128 })
+    .withMessage('Password must be 6-128 characters long')
+    .matches(/^(?=.*[a-zA-Z])(?=.*\d)/)
+    .withMessage('Password must contain at least one letter and one number')
+];
+
+
 // Input validation middleware
 const loginValidation = [
   body('username')
@@ -143,6 +172,130 @@ const clearAuthCookies = (res, req) => {
   res.clearCookie('refreshToken', { ...cookieOptions, path: '/' });
 };
 
+
+router.post('/register', authLimiter, registrationValidation, async (req, res) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { firstname, lastname, username, email, phoneCode, phone, password } = req.body;
+    const clientIP = req.ip || req.connection.remoteAddress;
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+
+    logger.info('Registration attempt:', { username, email, ip: clientIP });
+
+    // Check for existing username or email
+    const existingPool = getExistingDbPool();
+    const [existingUsers] = await existingPool.execute(
+      'SELECT id, username, email FROM users WHERE username = ? OR email = ? LIMIT 1',
+      [username, email]
+    );
+
+    if (existingUsers.length > 0) {
+      const existing = existingUsers[0];
+      const field = existing.username === username ? 'username' : 'email';
+      
+      logger.warn('Registration failed - duplicate field:', { 
+        field, 
+        value: field === 'username' ? username : email,
+        ip: clientIP 
+      });
+      
+      return res.status(409).json({
+        success: false,
+        error: `An account with this ${field} already exists`,
+        code: 'DUPLICATE_FIELD',
+        field
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Create user in fizzbuzz_upmax database
+    const [result] = await existingPool.execute(`
+      INSERT INTO users (
+        firstname, lastname, username, email, phone_code, phone, password, 
+        status, language_id, email_verification, sms_verification, 
+        two_fa, two_fa_verify, balance, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, 1, 1, 0, 1, 0.00, NOW(), NOW())
+    `, [firstname, lastname, username, email, phoneCode, phone, hashedPassword]);
+
+    const userId = result.insertId;
+
+    // Create SMS account in fizzbuzz_app
+    const pool = getPool();
+    await pool.execute(
+      'INSERT INTO sms_user_accounts (user_id, balance) VALUES (?, 0.00)',
+      [userId]
+    );
+
+    // Create session for auto-login
+    const session = await sessionService.createSession(userId, clientIP, userAgent);
+
+    // Store refresh token in Redis
+    const { getRedisClient } = require('../Config/redis');
+    const redis = getRedisClient();
+    if (redis && redis.isOpen) {
+      await redis.setEx(
+        `refresh_token:${userId}`,
+        604800, // 7 days
+        session.refreshToken
+      );
+    }
+
+    // Set authentication cookies
+    setAuthCookies(res, session, req);
+
+    // Log successful registration
+    await pool.execute(
+      `INSERT INTO api_logs (user_id, endpoint, method, status_code, ip_address, user_agent)
+       VALUES (?, '/api/auth/register', 'POST', 201, ?, ?)`,
+      [userId, clientIP, userAgent]
+    );
+
+    logger.info('Registration successful:', { 
+      userId, 
+      username, 
+      email,
+      sessionId: session.sessionId 
+    });
+
+    // Return success with user data (like login)
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful! Welcome to FizzBuzz Platform',
+      accessToken: session.accessToken,
+      user: {
+        id: userId,
+        username,
+        email,
+        firstname,
+        lastname,
+        balance: 0.00
+      },
+      session: {
+        id: session.sessionId,
+        expiresAt: session.expiresAt
+      }
+    });
+
+  } catch (error) {
+    logger.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Registration failed due to server error',
+      code: 'SERVER_ERROR'
+    });
+  }
+});
 
 // POST /api/auth/login
 router.post('/login', authLimiter, loginValidation, async (req, res) => {

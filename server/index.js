@@ -271,6 +271,24 @@ app.get('/api/csrf-token', csrfProtection, (req, res) => {
   });
 });
 
+// In your route where you might want to check service status
+app.get('/api/sms/background-status', csrfProtection, (req, res) => {
+  try {
+    const stats = smsBackgroundService.getStats();
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error('Error getting SMS service stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get service status'
+    });
+  }
+});
+
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -536,29 +554,6 @@ async function gracefulShutdown(signal) {
   }
 }
 
-// Graceful shutdown with error handling
-process.on('SIGTERM', () => {
-  try {
-    if (smsBackgroundService) {
-      smsBackgroundService.stop();
-      logger.info('SMS Background Service stopped gracefully');
-    }
-  } catch (error) {
-    logger.error('Error stopping SMS Background Service:', error);
-  }
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  try {
-    if (smsBackgroundService) {
-      smsBackgroundService.stop();
-    }
-  } catch (error) {
-    logger.error('Error stopping SMS Background Service:', error);
-  }
-  process.exit(0);
-});
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
