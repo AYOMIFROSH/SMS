@@ -19,6 +19,7 @@ const sessionService = require('./services/sessionService');
 const logger = require('./utils/logger');
 const webSocketService = require('./services/webhookService');
 const mobileOptimizationMiddleware = require('./middleware/mobile');
+const smsBackgroundService = require('./services/smsBackgroudService');
 
 const app = express();
 const server = http.createServer(app);
@@ -404,6 +405,16 @@ async function startServer() {
     webSocketService.initialize(server);
     logger.info('✅ WebSocket service initialized');
 
+    try {
+      // Start the service
+      smsBackgroundService.start();
+      logger.info('SMS Background Service started successfully');
+    } catch (error) {
+      logger.error('Failed to start SMS Background Service:', error);
+      // Don't crash the server if background service fails
+      console.error('Warning: SMS real-time checking disabled due to startup error');
+    }
+
     // Start server
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, '::', () => {
@@ -524,6 +535,30 @@ async function gracefulShutdown(signal) {
     process.exit(1);
   }
 }
+
+// Graceful shutdown with error handling
+process.on('SIGTERM', () => {
+  try {
+    if (smsBackgroundService) {
+      smsBackgroundService.stop();
+      logger.info('SMS Background Service stopped gracefully');
+    }
+  } catch (error) {
+    logger.error('Error stopping SMS Background Service:', error);
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  try {
+    if (smsBackgroundService) {
+      smsBackgroundService.stop();
+    }
+  } catch (error) {
+    logger.error('Error stopping SMS Background Service:', error);
+  }
+  process.exit(0);
+});
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
