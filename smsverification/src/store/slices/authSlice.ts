@@ -1,6 +1,6 @@
 // src/store/slices/authSlice.ts - Fixed auth state management
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { authApi } from '@/api/auth';
+import { authApi, RegisterData } from '@/api/auth';
 import { tokenManager } from '@/api/client';
 import { User } from '@/types';
 
@@ -23,6 +23,25 @@ const initialState: AuthState = {
   initialized: false,
   lastActivity: null,
 };
+
+export const register = createAsyncThunk<
+  { user: User; accessToken: string },
+  RegisterData,
+  { rejectValue: string }
+>(
+  'auth/register',
+  async (userData, { rejectWithValue }) => {
+    try {
+      const response = await authApi.register(userData);
+      return {
+        user: response.user,
+        accessToken: response.accessToken
+      };
+    } catch (error: any) {
+      return rejectWithValue(error.message);
+    }
+  }
+);
 
 // Thunks
 export const login = createAsyncThunk<
@@ -187,6 +206,39 @@ const authSlice = createSlice({
 
   extraReducers: (builder) => {
     builder
+
+    .addCase(register.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(register.fulfilled, (state, action) => {
+        const { user, accessToken } = action.payload;
+
+        state.loading = false;
+        state.user = user;
+        state.accessToken = accessToken;
+        state.isAuthenticated = true;
+        state.error = null;
+        state.initialized = true;
+        state.lastActivity = Date.now();
+
+        // Sync with token manager
+        tokenManager.setAccessToken(accessToken);
+        
+        console.log('✅ Registration successful for:', user.username);
+      })
+      .addCase(register.rejected, (state, action) => {
+        state.loading = false;
+        state.isAuthenticated = false;
+        state.user = null;
+        state.accessToken = null;
+        state.error = action.payload || 'Registration failed';
+
+        // Ensure token manager is cleared
+        tokenManager.clearTokens();
+        
+        console.log('❌ Registration failed:', action.payload);
+      })
       // Initialize Auth
       .addCase(initializeAuth.pending, (state) => {
         if (!state.initialized) {

@@ -11,6 +11,7 @@ import { History } from '@/pages/History';
 import { Transactions } from '@/pages/Transactions';
 import { Settings } from '@/pages/Settings';
 import Login from '@/pages/Login';
+import Register from './pages/Register';
 import PrivateRoute from '@/components/common/PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import  { PageLoader } from './components/common/LoadingSpinner';
@@ -162,6 +163,12 @@ const AppContent: React.FC = () => {
           <Route path="/login" element={
             <AuthLayout>
               <Login />
+            </AuthLayout>
+          } />
+
+           <Route path="/register" element={
+            <AuthLayout>
+              <Register />
             </AuthLayout>
           } />
 

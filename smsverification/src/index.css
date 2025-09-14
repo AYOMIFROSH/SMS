@@ -316,6 +316,58 @@
     animation: scaleIn 0.2s ease-out;
   }
 
+  .PhoneInput {
+  display: flex;
+  align-items: center;
+}
+
+.PhoneInputCountry {
+  margin-right: 0.5rem;
+  display: flex;
+  align-items: center;
+}
+
+.PhoneInputCountrySelect {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.PhoneInputCountrySelect:focus {
+  outline: none;
+}
+
+.PhoneInputNumberInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+
+.phone-input-container {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.phone-input-container:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+.phone-input-error {
+  border-color: #f87171 !important;
+}
+
+.phone-input-error:focus-within {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 1px #ef4444 !important;
+}
+
   @keyframes slideInRight {
     from { transform: translateX(100%); }
     to { transform: translateX(0); }

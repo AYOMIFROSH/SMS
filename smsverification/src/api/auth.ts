@@ -2,9 +2,25 @@
 import client, { tokenManager } from './client';
 import { User } from '@/types';
 
+export interface RegisterData {
+  firstname: string;
+  lastname: string;
+  username: string;
+  email: string;
+  phoneCode: string;
+  phone: string;
+  password: string;
+  confirmPassword: string;
+}
+
 export interface AuthResponse {
   success: boolean;
   message?: string;
+}
+
+export interface RegisterResponse extends AuthResponse {
+  accessToken: string;
+  user: User;
 }
 
 export interface LoginResponse extends AuthResponse {
@@ -20,6 +36,7 @@ export interface InitializeResponse {
   user: User | null;
   isAuthenticated: boolean;
 }
+
 
 export const authApi = {
   /**
@@ -79,6 +96,46 @@ export const authApi = {
       tokenManager.clearTokens();
       delete client.defaults.headers.common['Authorization'];
       console.log('Local tokens cleared');
+    }
+  },
+
+  /**
+   * Register new user account
+   */
+  register: async (userData: RegisterData): Promise<RegisterResponse> => {
+    console.log('Attempting registration for:', userData.username);
+
+    try {
+      const response = await client.post('/auth/register', userData);
+
+      if (response.data.success) {
+        console.log('Registration successful');
+        
+        // Store access token in memory
+        tokenManager.setAccessToken(response.data.accessToken);
+        
+        return response.data;
+      }
+      
+      throw new Error(response.data.message || 'Registration failed');
+    } catch (error: any) {
+      console.error('Registration failed:', error);
+      
+      if (error.response?.data?.code) {
+        const errorMap: Record<string, string> = {
+          'DUPLICATE_FIELD': error.response.data.field === 'username' 
+            ? 'Username already taken. Please choose another.'
+            : 'Email address already registered.',
+          'VALIDATION_ERROR': 'Please check your input and try again',
+          'RATE_LIMIT_EXCEEDED': 'Too many attempts. Try again later.',
+          'SERVER_ERROR': 'Server error occurred. Please try again.',
+        };
+        
+        const message = errorMap[error.response.data.code] || error.response.data.message;
+        throw new Error(message);
+      }
+      
+      throw new Error(error.response?.data?.message || error.message || 'Registration failed');
     }
   },
 

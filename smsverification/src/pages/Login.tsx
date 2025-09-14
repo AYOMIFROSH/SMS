@@ -1,6 +1,6 @@
 // src/pages/Login.tsx - Secure login with proper error handling and CSRF protection
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import toast from "react-hot-toast";
 import { PageLoader, ButtonLoader } from "@/components/common/LoadingSpinner";
@@ -235,6 +235,17 @@ useEffect(() => {
           </form>
 
           <div className="mt-8 text-center space-y-4">
+
+            <p className="text-sm text-slate-600">
+              Don't have an account?{' '}
+              <Link 
+                to="/register" 
+                className="text-blue-600 hover:text-blue-700 font-semibold underline"
+              >
+                Create account
+              </Link>
+            </p>
+
             <p className="text-sm text-slate-500">
               Secure sms purchasing platform 
             </p>

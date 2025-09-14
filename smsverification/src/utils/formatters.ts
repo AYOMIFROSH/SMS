@@ -212,28 +212,3 @@ export const isValidNigerianPhone = (phone: string): boolean => {
   return patterns.some(pattern => pattern.test(cleaned));
 };
 
-// Nigerian banks helper
-export const getNigerianBanks = () => [
-  { code: '044', name: 'Access Bank' },
-  { code: '014', name: 'Afribank Nigeria Plc' },
-  { code: '023', name: 'Citibank Nigeria Limited' },
-  { code: '050', name: 'Ecobank Nigeria Plc' },
-  { code: '011', name: 'First Bank of Nigeria Limited' },
-  { code: '214', name: 'First City Monument Bank Limited' },
-  { code: '070', name: 'Fidelity Bank Plc' },
-  { code: '058', name: 'Guaranty Trust Bank Plc' },
-  { code: '030', name: 'Heritage Banking Company Limited' },
-  { code: '082', name: 'Keystone Bank Limited' },
-  { code: '221', name: 'Stanbic IBTC Bank Plc' },
-  { code: '068', name: 'Standard Chartered Bank Nigeria Limited' },
-  { code: '232', name: 'Sterling Bank Plc' },
-  { code: '033', name: 'United Bank for Africa Plc' },
-  { code: '032', name: 'Union Bank of Nigeria Plc' },
-  { code: '035', name: 'Wema Bank Plc' },
-  { code: '057', name: 'Zenith Bank Plc' },
-];
-
-export const getBankNameByCode = (code: string): string => {
-  const bank = getNigerianBanks().find(b => b.code === code);
-  return bank ? bank.name : code;
-};
