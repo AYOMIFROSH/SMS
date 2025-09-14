@@ -147,7 +147,7 @@ const Register: React.FC = () => {
         confirmPassword: formData.confirmPassword
       })).unwrap();
 
-      toast.success("Registration successful! Welcome to FizzBuzz Platform!");
+      // toast.success("Registration successful! Welcome to FizzBuzz Platform!");
       
     } catch (error: any) {
       let errorMessage = "Registration failed. Please try again.";
