@@ -40,6 +40,7 @@ const ActiveNumbers: React.FC = () => {
   const handleCancel = async (id: number) => {
     try {
       await dispatch(cancelNumber(id)).unwrap();
+      handleRefresh();
       dispatch(fetchActiveNumbers({ page: 1, limit: 20 })); // Fix: Pass arguments
     } catch (error) {
       console.error('Failed to cancel number:', error);
