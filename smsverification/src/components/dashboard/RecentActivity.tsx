@@ -1,4 +1,4 @@
-// src/components/dashboard/RecentActivity.tsx - Optimized responsive version
+// src/components/dashboard/RecentActivity.tsx - Fixed price handling
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -53,6 +53,21 @@ const statusConfig = {
     dot: 'bg-gray-400',
     text: 'Expired',
   },
+};
+
+// Helper function to safely format price
+const formatPrice = (price: any): string => {
+  if (price === null || price === undefined) {
+    return '0.0000';
+  }
+  
+  const numPrice = typeof price === 'string' ? parseFloat(price) : price;
+  
+  if (isNaN(numPrice)) {
+    return '0.0000';
+  }
+  
+  return numPrice.toFixed(4);
 };
 
 const RecentActivity: React.FC<RecentActivityProps> = ({ activity, loading }) => {
@@ -146,7 +161,7 @@ const RecentActivity: React.FC<RecentActivityProps> = ({ activity, loading }) =>
                       </div>
                       <div className="flex flex-col items-end ml-2 flex-shrink-0">
                         <p className="text-sm font-medium text-gray-900">
-                          ${item.price?.toFixed(4)}
+                          ${formatPrice(item.price)}
                         </p>
                         <p className="text-xs text-gray-500">
                           {format(new Date(item.purchase_date), 'MMM dd, HH:mm')}

@@ -247,7 +247,7 @@ const numbersSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
-    
+
     // Update number status (used by WebSocket)
     updateNumberStatus: (state, action) => {
       const { activationId, status, code, smsText } = action.payload;
@@ -264,7 +264,7 @@ const numbersSlice = createSlice({
         console.log('📱 Updated number status:', { activationId, status, code });
       }
     },
-    
+
     // Add new purchase (used by WebSocket)
     addNewPurchase: (state, action) => {
       const newPurchase = action.payload;
@@ -275,14 +275,14 @@ const numbersSlice = createSlice({
         console.log('➕ Added new purchase:', newPurchase);
       }
     },
-    
+
     // Remove from active numbers
     removeFromActive: (state, action) => {
       const id = action.payload;
       state.activeNumbers = state.activeNumbers.filter(n => n.id !== id);
       console.log('➖ Removed from active:', id);
     },
-    
+
     // Update number in active list
     updateActiveNumber: (state, action) => {
       const { id, updates } = action.payload;
@@ -292,20 +292,20 @@ const numbersSlice = createSlice({
         console.log('🔄 Updated active number:', { id, updates });
       }
     },
-    
+
     // Reset pagination
     resetPagination: (state) => {
       state.pagination = initialState.pagination;
       state.historyPagination = initialState.historyPagination;
       state.subscriptionPagination = initialState.subscriptionPagination;
     },
-    
+
     // Set active numbers directly (for manual updates)
     setActiveNumbers: (state, action) => {
       state.activeNumbers = action.payload;
     }
   },
-  
+
   extraReducers: (builder) => {
     builder
       // Purchase Number
@@ -319,12 +319,20 @@ const numbersSlice = createSlice({
         state.error = null;
         console.log('✅ Purchase: Completed successfully');
       })
+      // In numbersSlice.ts, update the purchaseNumber.rejected case:
       .addCase(purchaseNumber.rejected, (state, action) => {
         state.purchasing = false;
         state.error = action.payload as string || 'Failed to purchase number';
+
+        // Show toast for specific errors
+        const errorMessage = action.payload as string;
+        if (errorMessage.includes('No numbers available')) {
+          // Don't set generic error for this case, let the component handle it
+          state.error = null;
+        }
+
         console.error('❌ Purchase: Failed with error:', state.error);
       })
-      
       // Fetch Active Numbers
       .addCase(fetchActiveNumbers.pending, (state) => {
         state.loading = true;
@@ -343,7 +351,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to fetch active numbers';
         console.error('❌ Fetch active: Failed with error:', state.error);
       })
-      
+
       // Fetch Number History
       .addCase(fetchNumberHistory.pending, (state) => {
         state.loading = true;
@@ -362,7 +370,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to fetch history';
         console.error('❌ Fetch history: Failed with error:', state.error);
       })
-      
+
       // Fetch Number Status
       .addCase(fetchNumberStatus.fulfilled, (state, action) => {
         const { id, ...statusData } = action.payload;
@@ -372,7 +380,7 @@ const numbersSlice = createSlice({
         }
         console.log('✅ Status updated for number:', id);
       })
-      
+
       // Cancel Number
       .addCase(cancelNumber.pending, (state) => {
         state.error = null;
@@ -390,7 +398,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to cancel number';
         console.error('❌ Cancel failed:', state.error);
       })
-      
+
       // Complete Number
       .addCase(completeNumber.pending, (state) => {
         state.error = null;
@@ -408,7 +416,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to complete number';
         console.error('❌ Complete failed:', state.error);
       })
-      
+
       // Retry Number
       .addCase(retryNumber.fulfilled, (state, action) => {
         const { id, newExpiryDate } = action.payload;
@@ -418,7 +426,7 @@ const numbersSlice = createSlice({
         }
         console.log('✅ SMS retry requested for:', id);
       })
-      
+
       // Fetch Full SMS
       .addCase(fetchFullSms.fulfilled, (state, action) => {
         const { id, fullText, code } = action.payload;
@@ -429,7 +437,7 @@ const numbersSlice = createSlice({
         }
         console.log('✅ Full SMS fetched for:', id);
       })
-      
+
       // Buy Subscription
       .addCase(buySubscription.pending, (state) => {
         state.subscriptionLoading = true;
@@ -451,7 +459,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to buy subscription';
         console.error('❌ Subscription purchase failed:', state.error);
       })
-      
+
       // Fetch Subscriptions
       .addCase(fetchSubscriptions.pending, (state) => {
         state.subscriptionLoading = true;
@@ -469,7 +477,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to fetch subscriptions';
         console.error('❌ Fetch subscriptions failed:', state.error);
       })
-      
+
       // Cancel Subscription
       .addCase(cancelSubscription.fulfilled, (state, action) => {
         const { id } = action.payload;
@@ -482,10 +490,10 @@ const numbersSlice = createSlice({
   },
 });
 
-export const { 
-  clearError, 
-  updateNumberStatus, 
-  addNewPurchase, 
+export const {
+  clearError,
+  updateNumberStatus,
+  addNewPurchase,
   removeFromActive,
   updateActiveNumber,
   resetPagination,

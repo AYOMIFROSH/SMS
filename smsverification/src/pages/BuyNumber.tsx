@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
-import { 
-  fetchServices, 
-  fetchCountries, 
+import {
+  fetchServices,
+  fetchCountries,
   fetchOperators,
   fetchPrices,
   fetchRestrictions,
@@ -12,7 +12,7 @@ import {
   setSelectedService,
   setSelectedOperator
 } from '@/store/slices/servicesSlice';
-import { purchaseNumber } from '@/store/slices/numbersSlice';
+import { purchaseNumber, clearError } from '@/store/slices/numbersSlice';
 import { usePayment } from '@/hooks/usePayment';
 import ServiceGrid from '@/components/services/ServiceGrid';
 import CountrySelector from '@/components/services/CountrySelector';
@@ -27,13 +27,13 @@ const BuyNumber: React.FC = () => {
   useDocumentTitle("SMS Purchase Numbers");
 
   const dispatch = useDispatch<AppDispatch>();
-  const { 
-    services, 
-    countries, 
+  const {
+    services,
+    countries,
     operators,
-    prices, 
+    prices,
     restrictions,
-    selectedCountry, 
+    selectedCountry,
     selectedService,
     selectedOperator,
     loading,
@@ -41,7 +41,7 @@ const BuyNumber: React.FC = () => {
     pricesLoading,
     error
   } = useSelector((state: RootState) => state.services);
-  
+
   const { purchasing } = useSelector((state: RootState) => state.numbers);
 
   // Use payment hook for real-time balance
@@ -75,18 +75,18 @@ const BuyNumber: React.FC = () => {
 
   // Fetch operators when country is selected
   useEffect(() => {
-    if (selectedCountry) {
-      console.log('🌍 Fetching operators for country:', selectedCountry);
+    if (selectedCountry && selectedService) {
+      console.log('📡 Fetching available operators for service:', { country: selectedCountry, service: selectedService });
       dispatch(fetchOperators(selectedCountry));
+      // After operators are loaded, we'll filter them by availability in the component
     }
-  }, [selectedCountry, dispatch]);
-
+  }, [selectedCountry, selectedService, dispatch]);
   // Fetch prices when service and country are selected
   useEffect(() => {
     if (selectedCountry && selectedService) {
       console.log('💲 Fetching prices for:', { country: selectedCountry, service: selectedService });
       dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
-      
+
       // Fetch restrictions
       dispatch(fetchRestrictions({ country: selectedCountry, service: selectedService }));
     }
@@ -107,6 +107,7 @@ const BuyNumber: React.FC = () => {
     dispatch(setSelectedOperator(operatorId));
   };
 
+  // REPLACE the handlePurchase function in BuyNumber.tsx:
   const handlePurchase = async () => {
     if (!selectedService || !selectedCountry) {
       toast.error('Please select a service and country');
@@ -134,51 +135,75 @@ const BuyNumber: React.FC = () => {
       };
 
       console.log('🛒 Purchasing number with data:', purchaseData);
-      
+
       await dispatch(purchaseNumber(purchaseData)).unwrap();
-      
+
       toast.success('Number purchased successfully!', {
         icon: '🎉',
         duration: 5000
       });
-      
+
       // Refresh balance after successful purchase
       payment.refreshBalance();
-      
+
       // Reset selections
       dispatch(setSelectedCountry(null));
       dispatch(setSelectedService(null));
       dispatch(setSelectedOperator(null));
       setStep('country');
       setMaxPrice(null);
-      
+
     } catch (error: any) {
       console.error('❌ Purchase failed:', error);
-      // Refresh balance in case of error too (might have been deducted)
+
+      // Handle specific error cases with helpful messages
+      if (error.includes('No numbers available')) {
+        if (selectedOperator && selectedOperator !== '') {
+          toast.error(
+            `No numbers available for ${selectedOperator} operator. Try "Any Operator" option.`,
+            {
+              duration: 8000,
+              icon: '⚠️'
+            }
+          );
+          // Auto-reset to "Any Operator"
+          dispatch(setSelectedOperator(''));
+        } else {
+          toast.error('No numbers currently available for this service/country combination.');
+        }
+      } else if (error.includes('Insufficient balance')) {
+        toast.error('Insufficient balance. Please top up your account.');
+      } else if (error.includes('Invalid service')) {
+        toast.error('Invalid service selected. Please try again.');
+      } else {
+        toast.error(error || 'Failed to purchase number. Please try again.');
+      }
+
+      // Refresh balance in case of error too
       payment.refreshBalance();
     }
   };
 
   const getCurrentPrice = () => {
     if (!prices || !selectedCountry || !selectedService) return null;
-    
+
     const countryPrices = prices[selectedCountry];
     if (!countryPrices) return null;
-    
+
     const servicePrices = countryPrices[selectedService];
     if (!servicePrices) return null;
-    
+
     let realPrice = 0;
-    
+
     if (selectedOperator && servicePrices[selectedOperator]) {
       const operatorPrice = servicePrices[selectedOperator];
-      realPrice = Number(typeof operatorPrice === 'object' ? 
+      realPrice = Number(typeof operatorPrice === 'object' ?
         operatorPrice.cost || operatorPrice.price || 0 :
         operatorPrice || 0);
     } else {
       realPrice = Number(servicePrices.cost || servicePrices || 0);
     }
-    
+
     // BONUS SYSTEM: Return total price (real + 100% bonus)
     return realPrice * 2; // User sees and pays double the real price
   };
@@ -250,7 +275,7 @@ const BuyNumber: React.FC = () => {
     const countryName = countries.find(c => c.code === selectedCountry)?.name;
     const serviceName = services.find(s => s.code === selectedService)?.name;
     const operatorName = getCurrentOperators().find(o => o.id === selectedOperator)?.name;
-    
+
     return {
       country: countryName || selectedCountry,
       service: serviceName || selectedService,
@@ -324,7 +349,7 @@ const BuyNumber: React.FC = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-2">
               {/* Balance indicator */}
               <div className="text-xs text-gray-600 flex items-center">
@@ -349,22 +374,20 @@ const BuyNumber: React.FC = () => {
               {[1, 2, 3, 4].map((num) => {
                 const isActive = stepInfo?.number === num;
                 const isCompleted = stepInfo ? stepInfo.number > num : false;
-                
+
                 return (
                   <React.Fragment key={num}>
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                      isActive 
-                        ? 'bg-primary-600 text-white' 
-                        : isCompleted 
-                        ? 'bg-green-500 text-white' 
-                        : 'bg-gray-200 text-gray-500'
-                    }`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${isActive
+                        ? 'bg-primary-600 text-white'
+                        : isCompleted
+                          ? 'bg-green-500 text-white'
+                          : 'bg-gray-200 text-gray-500'
+                      }`}>
                       {isCompleted ? '✓' : num}
                     </div>
                     {num < 4 && (
-                      <div className={`flex-1 h-1 rounded ${
-                        isCompleted ? 'bg-green-500' : 'bg-gray-200'
-                      }`} />
+                      <div className={`flex-1 h-1 rounded ${isCompleted ? 'bg-green-500' : 'bg-gray-200'
+                        }`} />
                     )}
                   </React.Fragment>
                 );
@@ -386,7 +409,7 @@ const BuyNumber: React.FC = () => {
                   <ChevronDown className="h-4 w-4 text-gray-400" />
                 )}
               </button>
-              
+
               {showMobileSummary && (
                 <div className="mt-2 space-y-1">
                   {summary.country && (
@@ -427,7 +450,7 @@ const BuyNumber: React.FC = () => {
             <h1 className="text-2xl font-bold text-gray-900">Buy SMS Number</h1>
             <p className="text-gray-400 mt-0.5">Select a country, service, and operator to purchase an SMS number.</p>
           </div>
-          
+
           <div className="flex items-center gap-4">
             {/* Balance display */}
             <div className="bg-primary-50 px-4 py-2 rounded-lg flex items-center">
@@ -438,7 +461,7 @@ const BuyNumber: React.FC = () => {
                 <div className="ml-2 w-3 h-3 border border-primary-400 border-t-primary-600 rounded-full animate-spin"></div>
               )}
             </div>
-            
+
             <div className="flex gap-3">
               {(selectedCountry || selectedService || selectedOperator) && (
                 <button
@@ -448,7 +471,7 @@ const BuyNumber: React.FC = () => {
                   Reset Selection
                 </button>
               )}
-              
+
               <button
                 onClick={refreshData}
                 disabled={loading || payment.loading.balance}
@@ -463,32 +486,32 @@ const BuyNumber: React.FC = () => {
 
         {/* Desktop Progress Steps */}
         <div className="flex items-center justify-center space-x-4 lg:space-x-8 py-4 mb-6">
-          <StepIndicator 
-            step={1} 
-            title="Select Country" 
-            isActive={step === 'country'} 
-            isCompleted={Boolean(selectedCountry)} 
+          <StepIndicator
+            step={1}
+            title="Select Country"
+            isActive={step === 'country'}
+            isCompleted={Boolean(selectedCountry)}
           />
           <StepConnector isCompleted={Boolean(selectedCountry)} />
-          <StepIndicator 
-            step={2} 
-            title="Select Service" 
-            isActive={step === 'service'} 
-            isCompleted={Boolean(selectedService)} 
+          <StepIndicator
+            step={2}
+            title="Select Service"
+            isActive={step === 'service'}
+            isCompleted={Boolean(selectedService)}
           />
           <StepConnector isCompleted={Boolean(selectedService)} />
-          <StepIndicator 
-            step={3} 
-            title="Select Operator" 
-            isActive={step === 'operator'} 
-            isCompleted={Boolean(selectedOperator !== null)} 
+          <StepIndicator
+            step={3}
+            title="Select Operator"
+            isActive={step === 'operator'}
+            isCompleted={Boolean(selectedOperator !== null)}
           />
           <StepConnector isCompleted={Boolean(selectedOperator !== null)} />
-          <StepIndicator 
-            step={4} 
-            title="Confirm Purchase" 
-            isActive={step === 'confirm'} 
-            isCompleted={false} 
+          <StepIndicator
+            step={4}
+            title="Confirm Purchase"
+            isActive={step === 'confirm'}
+            isCompleted={false}
           />
         </div>
       </div>
@@ -539,7 +562,7 @@ const BuyNumber: React.FC = () => {
         {step === 'confirm' && selectedCountry && selectedService && (
           <div className="p-4 lg:p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4 lg:mb-6">Confirm Purchase</h3>
-            
+
             {/* Selection Summary - Mobile Optimized */}
             <div className="bg-gray-50 rounded-lg p-4 lg:p-6 mb-4 lg:mb-6">
               <div className="space-y-3 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-4">
@@ -564,7 +587,7 @@ const BuyNumber: React.FC = () => {
                   </div>
                 )}
               </div>
-              
+
               {/* Max Price Setting - Mobile Optimized */}
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <label className="block text-xs lg:text-sm font-medium text-gray-700 mb-2">
@@ -604,7 +627,7 @@ const BuyNumber: React.FC = () => {
                   <Info className="h-4 w-4 mr-1" />
                   {showRestrictions ? 'Hide' : 'Show'} Service Information
                 </button>
-                
+
                 {showRestrictions && (
                   <div className="mt-3 p-4 bg-blue-50 rounded-lg">
                     <RestrictionsDisplay restrictions={getCurrentRestrictions()} />
@@ -613,16 +636,39 @@ const BuyNumber: React.FC = () => {
               </div>
             )}
 
+            {/* Error Display - Add this before the purchase button */}
+            {error && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-red-800">Purchase Error</p>
+                    <p className="text-sm text-red-700 mt-1">{error}</p>
+                    {error.includes('No numbers available') && selectedOperator && selectedOperator !== '' && (
+                      <button
+                        onClick={() => {
+                          dispatch(setSelectedOperator(''));
+                          dispatch(clearError());
+                        }}
+                        className="mt-2 text-sm font-medium text-red-800 hover:text-red-900 underline"
+                      >
+                        Try "Any Operator" instead
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons - Mobile Optimized with enhanced checks */}
             <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 mt-6">
               <button
                 onClick={handlePurchase}
                 disabled={purchasing || !canAfford() || pricesLoading || payment.loading.balance}
-                className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${
-                  purchasing || !canAfford() || pricesLoading || payment.loading.balance
+                className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${purchasing || !canAfford() || pricesLoading || payment.loading.balance
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-primary-600 text-white hover:bg-primary-700'
-                }`}
+                  }`}
               >
                 {purchasing ? (
                   <span className="flex items-center justify-center">
@@ -643,7 +689,7 @@ const BuyNumber: React.FC = () => {
                   'Purchase Number'
                 )}
               </button>
-              
+
               <button
                 onClick={goBack}
                 className="lg:flex-none px-6 py-3 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-center"
@@ -687,7 +733,7 @@ const BuyNumber: React.FC = () => {
               <span className="text-sm font-medium">Back</span>
             </button>
           )}
-          
+
           <div className="flex items-center space-x-4">
             {summary.price && (
               <div className="text-right">
@@ -695,7 +741,7 @@ const BuyNumber: React.FC = () => {
                 <p className="text-lg font-bold text-gray-900">${summary.price.toFixed(4)}</p>
               </div>
             )}
-            
+
             <div className="text-right">
               <p className="text-xs text-gray-500 flex items-center">
                 Balance
@@ -725,13 +771,12 @@ const StepIndicator: React.FC<{
   isCompleted: boolean;
 }> = ({ step, title, isActive, isCompleted }) => (
   <div className={`flex items-center space-x-2 ${isActive ? 'text-primary-600' : isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-      isActive 
-        ? 'bg-primary-600 text-white' 
-        : isCompleted 
-        ? 'bg-green-500 text-white' 
-        : 'bg-gray-200 text-gray-500'
-    }`}>
+    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${isActive
+        ? 'bg-primary-600 text-white'
+        : isCompleted
+          ? 'bg-green-500 text-white'
+          : 'bg-gray-200 text-gray-500'
+      }`}>
       {isCompleted ? <CheckCircle className="w-4 h-4" /> : step}
     </div>
     <span className="text-sm font-medium hidden xl:inline">{title}</span>
@@ -757,26 +802,26 @@ const RestrictionsDisplay: React.FC<{ restrictions: any }> = ({ restrictions }) 
           </span>
         </div>
       )}
-      
+
       {restrictions.availableOperators && (
         <div className="text-sm text-gray-700">
           <strong>Available operators:</strong> {restrictions.availableOperators}
         </div>
       )}
-      
+
       {restrictions.currentStock && (
         <div className="text-sm text-gray-700">
           <strong>Current stock:</strong> {restrictions.currentStock} numbers
         </div>
       )}
-      
+
       {restrictions.priceRange && (
         <div className="text-sm text-gray-700">
-          <strong>Price range:</strong> ${restrictions.priceRange.min} - ${restrictions.priceRange.max} 
+          <strong>Price range:</strong> ${restrictions.priceRange.min} - ${restrictions.priceRange.max}
           (avg: ${restrictions.priceRange.average})
         </div>
       )}
-      
+
       {restrictions.recommendations && restrictions.recommendations.length > 0 && (
         <div className="space-y-2">
           <strong className="text-sm text-gray-700">Recommendations:</strong>

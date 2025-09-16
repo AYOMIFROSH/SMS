@@ -2,12 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { format, formatDistance } from 'date-fns';
-import { 
-  Copy, 
-  Check, 
-  Clock, 
-  MessageSquare, 
-  X, 
+import {
+  Copy,
+  Check,
+  Clock,
+  MessageSquare,
+  X,
   CheckCircle,
   AlertCircle,
 } from 'lucide-react';
@@ -32,7 +32,7 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
     const updateTimer = () => {
       const now = new Date();
       const expiry = new Date(number.expiry_date!);
-      
+
       if (now > expiry) {
         setTimeLeft('Expired');
         return;
@@ -133,7 +133,7 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
             </p>
           </div>
         </div>
-        
+
         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color}`}>
           {statusConfig.text}
         </span>
@@ -188,9 +188,8 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
       {/* Timer */}
       {number.status === 'waiting' && timeLeft && (
         <div className="mb-4">
-          <div className={`flex items-center justify-between p-3 rounded-md ${
-            timeLeft === 'Expired' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
-          }`}>
+          <div className={`flex items-center justify-between p-3 rounded-md ${timeLeft === 'Expired' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
+            }`}>
             <div className="flex items-center space-x-2">
               <Clock className="h-4 w-4" />
               <span className="text-sm font-medium">
@@ -220,6 +219,7 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
       </div>
 
       {/* Actions */}
+      {/* Actions */}
       <div className="flex space-x-2">
         {number.status === 'waiting' && (
           <>
@@ -229,9 +229,25 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
             >
               Cancel
             </button>
+            <button
+              onClick={() => {
+                // Add refresh functionality
+                toast.promise(
+                  fetch(`/api/numbers/${number.id}/refresh`, { method: 'POST' }),
+                  {
+                    loading: 'Refreshing number...',
+                    success: 'Number refreshed successfully!',
+                    error: 'Failed to refresh number'
+                  }
+                );
+              }}
+              className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+            >
+              Refresh
+            </button>
           </>
         )}
-        
+
         {number.status === 'received' && (
           <button
             onClick={onComplete}

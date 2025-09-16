@@ -68,25 +68,3 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
   }
 };
 
-export const getCountryName = (countryCode: string): string => {
-  const countryNames: { [key: string]: string } = {
-    '0': 'Global/International',
-    '1': 'United States',
-    '2': 'Ukraine',
-    '3': 'Russia',
-    '6': 'Kazakhstan',
-    '7': 'Russia',
-    '44': 'United Kingdom',
-    '33': 'France',
-    '49': 'Germany',
-    '34': 'Spain',
-    '39': 'Italy',
-    '31': 'Netherlands',
-    '46': 'Sweden',
-    '47': 'Norway',
-    '48': 'Poland',
-    // Add more as needed
-  };
-  
-  return countryNames[countryCode] || `Country ${countryCode}`;
-};

@@ -1,4 +1,4 @@
-// src/components/dashboard/StatsCards.tsx - Optimized without balance redundancy
+// src/components/dashboard/StatsCards.tsx - Fixed with safe number handling
 import React from 'react';
 import { 
   Smartphone, 
@@ -14,11 +14,31 @@ interface StatsCardsProps {
   stats: DashboardStats | null;
 }
 
+// Helper functions for safe number formatting
+const safeToString = (value: any): string => {
+  if (value === null || value === undefined) return '0';
+  return String(value);
+};
+
+const safeToFixed = (value: any, decimals: number = 2): string => {
+  if (value === null || value === undefined) {
+    return '0.' + '0'.repeat(decimals);
+  }
+  
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  if (isNaN(numValue)) {
+    return '0.' + '0'.repeat(decimals);
+  }
+  
+  return numValue.toFixed(decimals);
+};
+
 const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
   const cards = [
     {
       name: 'Active Numbers',
-      value: stats?.activeNumbers?.toString() || '0',
+      value: safeToString(stats?.activeNumbers),
       icon: Smartphone,
       color: 'bg-blue-500',
       bgColor: 'bg-blue-50',
@@ -26,7 +46,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: "Today's Purchases",
-      value: stats?.todayPurchases?.toString() || '0',
+      value: safeToString(stats?.todayPurchases),
       icon: ShoppingBag,
       color: 'bg-purple-500',
       bgColor: 'bg-purple-50',
@@ -34,7 +54,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Success Rate',
-      value: `${stats?.successRate?.toFixed(1) || '0.0'}%`,
+      value: `${safeToFixed(stats?.successRate, 1)}%`,
       icon: TrendingUp,
       color: 'bg-emerald-500',
       bgColor: 'bg-emerald-50',
@@ -42,7 +62,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Total Numbers',
-      value: stats?.totalNumbers?.toString() || '0',
+      value: safeToString(stats?.totalNumbers),
       icon: Phone,
       color: 'bg-orange-500',
       bgColor: 'bg-orange-50',
@@ -50,7 +70,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Total Spent',
-      value: `${stats?.totalSpent?.toFixed(2) || '0.00'}`,
+      value: `$${safeToFixed(stats?.totalSpent, 2)}`,
       icon: DollarSign,
       color: 'bg-red-500',
       bgColor: 'bg-red-50',
@@ -58,7 +78,7 @@ const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
     },
     {
       name: 'Today Spent',
-      value: `${stats?.todaySpent?.toFixed(2) || '0.00'}`,
+      value: `$${safeToFixed(stats?.todaySpent, 2)}`,
       icon: Clock,
       color: 'bg-indigo-500',
       bgColor: 'bg-indigo-50',

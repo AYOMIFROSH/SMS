@@ -60,9 +60,9 @@ export const servicesApi = {
     try {
       console.log('🌍 Making API call to /services/countries');
       const response = await client.get('/services/countries');
-      
+
       console.log('📡 Countries response:', response.data);
-      
+
       // FIXED: Handle exact server response format
       if (response.data && response.data.success) {
         return {
@@ -98,14 +98,54 @@ export const servicesApi = {
     }
   },
 
+  // REPLACE the getAvailabilityForService method in services.ts with this:
+  getAvailabilityForService: async (country: string, service: string) => {
+    try {
+      console.log('📊 Making API call for service availability:', { country, service });
+      const response = await client.get('/services/availability', {
+        params: { country }
+      });
+
+      if (response.data && response.data.success) {
+        // Filter availability data for the specific service
+        const availability = response.data.data || {};
+        const serviceAvailability: Record<string, any> = {}; // Fix: Proper typing
+
+        Object.keys(availability).forEach(key => {
+          if (key.includes(service)) {
+            serviceAvailability[key] = availability[key];
+          }
+        });
+
+        return {
+          success: true,
+          data: serviceAvailability
+        };
+      } else {
+        return {
+          success: false,
+          error: response.data?.error || 'Failed to fetch availability',
+          data: {}
+        };
+      }
+    } catch (error: any) {
+      console.error('❌ API Error in getAvailabilityForService:', error);
+      return {
+        success: false,
+        error: error.message || 'Unknown error occurred',
+        data: {}
+      };
+    }
+  },
+
   // FIXED: Get operators by country - handle exact server response
   getOperatorsByCountry: async (country: string) => {
     try {
       console.log('📡 Making API call to /services/operators/' + country);
       const response = await client.get(`/services/operators/${country}`);
-      
+
       console.log('📡 Operators response:', response.data);
-      
+
       // FIXED: Handle exact server response format
       if (response.data && response.data.success) {
         return {
@@ -249,9 +289,9 @@ export const servicesApi = {
     try {
       console.log('🔒 Making API call to /services/restrictions');
       const response = await client.get(`/services/restrictions/${country}/${service}`);
-      
+
       console.log('📡 Restrictions response:', response.data);
-      
+
       // FIXED: Handle exact server response format
       if (response.data && response.data.success) {
         return {
