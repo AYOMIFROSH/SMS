@@ -369,6 +369,9 @@ app.use((err, req, res, next) => {
   });
 });
 
+let sessionCleanupInterval = null;
+let settlementMonitorInterval = null;
+
 // Server startup function
 async function startServer() {
   try {
@@ -507,40 +510,73 @@ async function gracefulShutdown(signal) {
     // 1. Stop accepting new connections
     logger.info('⏹ Stopping server...');
 
-    // 2. Close WebSocket connections
+    // 2. Clear all intervals first
+    if (sessionCleanupInterval) {
+      clearInterval(sessionCleanupInterval);
+      sessionCleanupInterval = null;
+      logger.info('✅ Session cleanup interval cleared');
+    }
+
+    if (settlementMonitorInterval) {
+      clearInterval(settlementMonitorInterval);
+      settlementMonitorInterval = null;
+      logger.info('✅ Settlement monitoring interval cleared');
+    }
+
+    // 3. Stop SMS background service
+    try {
+      logger.info('⏹ Stopping SMS background service...');
+      await smsBackgroundService.stop();
+      logger.info('✅ SMS background service stopped');
+    } catch (error) {
+      logger.warn('⚠️ SMS background service shutdown error:', error.message);
+    }
+
+    // 4. Close WebSocket connections
     const webSocketService = require('./services/webhookService');
     if (webSocketService.wss) {
+      logger.info('⏹ Closing WebSocket connections...');
       webSocketService.wss.clients.forEach(ws => {
         ws.close(1000, 'Server shutting down');
       });
+      logger.info('✅ WebSocket connections closed');
     }
 
-    // 3. Wait for existing requests to complete (max 30s)
+    // 5. Wait for existing HTTP requests to complete (max 30s)
+    logger.info('⏳ Waiting for existing requests to complete...');
     await new Promise(resolve => {
-      const timeout = setTimeout(resolve, 30000);
+      const timeout = setTimeout(() => {
+        logger.warn('⚠️ Shutdown timeout reached, forcing close');
+        resolve();
+      }, 30000);
+      
       server.close(() => {
         clearTimeout(timeout);
+        logger.info('✅ HTTP server closed');
         resolve();
       });
     });
 
-    // 4. Close database connections
+    // 6. Close database connections
     const pool = getPool();
     const existingPool = getExistingDbPool();
 
     if (pool) {
+      logger.info('⏹ Closing main database connection...');
       await pool.end();
       logger.info('✅ Main database connection closed');
     }
 
     if (existingPool) {
+      logger.info('⏹ Closing existing database connection...');
       await existingPool.end();
       logger.info('✅ Existing database connection closed');
     }
 
-    // 5. Close Redis connection
+    // 7. Close Redis connection
     const redis = getRedisClient();
     if (redis && redis.isOpen) {
+      logger.info('⏹ Closing Redis connection...');
       await redis.quit();
       logger.info('✅ Redis connection closed');
     }
@@ -553,7 +589,6 @@ async function gracefulShutdown(signal) {
     process.exit(1);
   }
 }
-
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

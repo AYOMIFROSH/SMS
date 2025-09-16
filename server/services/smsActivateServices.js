@@ -293,9 +293,9 @@ class SmsActivateService {
     }
   }
 
-  async getPrices(country = null, service = null) {
+  async getPrices(country = null, service = null, operator = null) {
     try {
-      const cacheKey = `sms:prices:${country || 'all'}:${service || 'all'}`;
+      const cacheKey = `sms:prices:${country || 'all'}:${service || 'all'}: ${operator || 'all'}`;
       const cached = await cacheService.get(cacheKey);
       if (cached) return cached;
 
@@ -340,36 +340,37 @@ class SmsActivateService {
 
   // Enhanced number purchase with better error handling
   async getNumber(service, country = null, operator = null, maxPrice = null) {
-    const params = { service };
-    if (country) params.country = country;
-    if (operator) params.operator = operator;
-    if (maxPrice) params.maxPrice = maxPrice;
+  const params = { service };
+  if (country) params.country = country;
+  if (operator) params.operator = operator;
+  // REMOVED: maxPrice is not supported by SMS-Activate getNumber API
+  // The price validation should be done before calling this method
+  
+  try {
+    logger.info('📱 Purchasing number:', params);
+    const response = await this.makeRequest('getNumber', params);
     
-    try {
-      logger.info('📱 Purchasing number:', params);
-      const response = await this.makeRequest('getNumber', params);
+    if (typeof response === 'string') {
+      const parts = response.split(':');
+      const status = parts[0];
       
-      if (typeof response === 'string') {
-        const parts = response.split(':');
-        const status = parts[0];
-        
-        if (status === 'ACCESS_NUMBER') {
-          return { 
-            id: parts[1], 
-            number: parts[2],
-            status: 'purchased'
-          };
-        } else {
-          throw new Error(this.parseErrorResponse(response) || response);
-        }
+      if (status === 'ACCESS_NUMBER') {
+        return { 
+          id: parts[1], 
+          number: parts[2],
+          status: 'purchased'
+        };
+      } else {
+        throw new Error(this.parseErrorResponse(response) || response);
       }
-      
-      throw new Error('Invalid number response format');
-    } catch (error) {
-      logger.error('❌ Get number error:', error);
-      throw error;
     }
+    
+    throw new Error('Invalid number response format');
+  } catch (error) {
+    logger.error('❌ Get number error:', error);
+    throw error;
   }
+}
 
   // Enhanced status management
   async setStatus(id, status, forward = null) {
@@ -418,6 +419,8 @@ class SmsActivateService {
       throw error;
     }
   }
+
+  
 
   // NEW: Get full SMS text
   async getFullSms(id) {

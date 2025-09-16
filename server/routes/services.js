@@ -149,6 +149,65 @@ router.get('/countries', authenticateToken, async (req, res) => {
 });
 
 // NEW: Get operators by country
+router.get('/operators/:country/:service',
+  authenticateToken,
+  [
+    require('express-validator').param('country')
+      .matches(/^[0-9]+$/)
+      .withMessage('Country code must be numeric'),
+    require('express-validator').param('service')
+      .matches(/^[a-zA-Z0-9_-]+$/)
+      .withMessage('Invalid service code format')
+  ],
+  handleValidationErrors,
+  async (req, res) => {
+    const { country, service } = req.params;
+
+    try {
+      logger.info('🔍 Getting operators with availability for:', { country, service });
+
+      // Get all operators for country
+      const allOperators = await smsActivateService.getOperators(country);
+      
+      // Get availability for the specific service
+      const availability = await smsActivateService.getNumbersStatus(country);
+      
+      // Filter operators that have availability for this service
+      const availableOperators = allOperators.filter(operator => {
+        const key = `${service}_${operator.id}`;
+        const count = availability[key];
+        return count && parseInt(count) > 0;
+      });
+
+      logger.info('✅ Available operators found:', {
+        country,
+        service,
+        total: allOperators.length,
+        available: availableOperators.length
+      });
+
+      res.json({
+        success: true,
+        data: availableOperators,
+        total: availableOperators.length,
+        country,
+        service,
+        message: availableOperators.length === 0 ? 'No operators have numbers available for this service' : undefined
+      });
+
+    } catch (error) {
+      logger.error('❌ Operators availability route error:', error);
+      res.status(500).json({
+        error: 'Failed to get operators with availability',
+        message: error.message,
+        country,
+        service
+      });
+    }
+  }
+);
+
+// Update existing operators endpoint to include availability hints
 router.get('/operators/:country',
   authenticateToken,
   [
@@ -161,20 +220,30 @@ router.get('/operators/:country',
     const { country } = req.params;
 
     try {
-      logger.info('🔍 Getting operators for country:', country);
+      logger.info('📡 Getting operators for country:', country);
 
       const operators = await smsActivateService.getOperators(country);
+      
+      // Add availability status hint (general availability, not service-specific)
+      const availability = await smsActivateService.getNumbersStatus(country);
+      
+      const operatorsWithStatus = operators.map(operator => ({
+        ...operator,
+        hasGeneralAvailability: Object.keys(availability).some(key => 
+          key.includes(`_${operator.id}`) && parseInt(availability[key]) > 0
+        )
+      }));
 
       logger.info('✅ Operators retrieved successfully:', {
         country,
-        count: operators.length
+        count: operatorsWithStatus.length
       });
 
       res.json({
         success: true,
-        data: operators,
+        data: operatorsWithStatus,
         country: country,
-        total: operators.length
+        total: operatorsWithStatus.length
       });
 
     } catch (error) {

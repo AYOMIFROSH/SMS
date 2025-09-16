@@ -4,9 +4,9 @@ const { authenticateToken } = require('../middleware/auth');
 const { getPool } = require('../Config/database');
 const smsActivateService = require('../services/smsActivateServices');
 const webSocketService = require('../services/webhookService');
-const { 
-  rateLimiters, 
-  validationRules, 
+const {
+  rateLimiters,
+  validationRules,
   handleValidationErrors,
 } = require('../middleware/security');
 const logger = require('../utils/logger');
@@ -17,7 +17,7 @@ const router = express.Router();
 router.use(rateLimiters.sms);
 
 // UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
-router.post('/purchase', 
+router.post('/purchase',
   authenticateToken,
   [
     require('express-validator').body('service')
@@ -43,12 +43,12 @@ router.post('/purchase',
     const userId = req.user.id;
 
     try {
-      logger.info('📱 Number purchase request with BONUS system:', { 
-        userId, 
-        service, 
-        country, 
-        operator, 
-        maxPrice 
+      logger.info('📱 Number purchase request with BONUS system:', {
+        userId,
+        service,
+        country,
+        operator,
+        maxPrice
       });
 
       // Get current price for the service from SMS-Activate API
@@ -56,7 +56,7 @@ router.post('/purchase',
       const realPrice = prices?.[country]?.[service]?.cost || 0;
 
       if (realPrice === 0) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Service not available in selected country',
           code: 'SERVICE_UNAVAILABLE'
         });
@@ -77,7 +77,7 @@ router.post('/purchase',
 
       // Check if total price exceeds user's maxPrice
       if (maxPrice && totalPrice > maxPrice) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: `Total price ${totalPrice.toFixed(4)} exceeds maximum ${maxPrice.toFixed(4)}`,
           code: 'PRICE_EXCEEDED',
           realPrice: realPrice,
@@ -89,7 +89,7 @@ router.post('/purchase',
 
       // Check user balance in user_demo_balances table
       const pool = getPool();
-      
+
       // Get or create balance record
       await pool.execute(`
         INSERT IGNORE INTO user_demo_balances (user_id, balance, total_deposited, total_spent)
@@ -105,7 +105,7 @@ router.post('/purchase',
 
       // CRITICAL: Check if user has enough balance for TOTAL price (real + bonus)
       if (currentBalance < totalPrice) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Insufficient balance for purchase including bonus',
           code: 'INSUFFICIENT_BALANCE',
           required: totalPrice,
@@ -136,7 +136,6 @@ router.post('/purchase',
           service,
           country,
           operator,
-          realPrice // Use real price for API call
         );
 
         const { id: activationId, number } = numberData;
@@ -152,10 +151,10 @@ router.post('/purchase',
             service_name, price, status, expiry_date, purchase_date)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, NOW())`,
           [
-            userId, 
-            activationId, 
-            number, 
-            country, 
+            userId,
+            activationId,
+            number,
+            country,
             service,
             service.toUpperCase(), // Service name
             totalPrice, // Store total price user paid (including bonus)
@@ -192,11 +191,11 @@ router.post('/purchase',
             reference_id, description, status, created_at)
            VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'completed', NOW())`,
           [
-            userId, 
+            userId,
             totalPrice,
             currentBalance,
             remainingBalance,
-            activationId, 
+            activationId,
             `SMS Number Purchase: ${service.toUpperCase()} (${country}) - Real: $${realPrice.toFixed(4)}, Bonus: $${bonusAmount.toFixed(4)}, Total: $${totalPrice.toFixed(4)}`
           ]
         );
@@ -230,9 +229,9 @@ router.post('/purchase',
           logger.warn('WebSocket notification failed (non-critical):', wsError.message);
         }
 
-        logger.info('✅ Number purchased successfully with bonus system:', { 
-          userId, 
-          activationId, 
+        logger.info('✅ Number purchased successfully with bonus system:', {
+          userId,
+          activationId,
           number,
           service,
           country,
@@ -272,6 +271,7 @@ router.post('/purchase',
         throw purchaseError;
       }
 
+      // REPLACE the existing catch block with this enhanced version:
     } catch (error) {
       logger.error('❌ Purchase error with bonus system:', {
         error: error.message,
@@ -282,42 +282,49 @@ router.post('/purchase',
         stack: error.stack
       });
 
-      // Handle specific SMS-Activate errors
+      // Enhanced error handling with proper status codes
       if (error.message.includes('NO_NUMBERS')) {
-        return res.status(400).json({ 
-          error: 'No numbers available for this service/country combination',
-          code: 'NO_NUMBERS_AVAILABLE'
+        return res.status(400).json({
+          error: `No numbers available for this service/country${operator ? '/operator' : ''} combination`,
+          code: 'NO_NUMBERS_AVAILABLE',
+          suggestion: operator ? 'Try selecting "Any Operator" option' : 'Try a different service or country',
+          details: {
+            service,
+            country,
+            operator: operator || null
+          }
         });
       } else if (error.message.includes('NO_BALANCE')) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'SMS-Activate account has insufficient balance',
           code: 'PROVIDER_NO_BALANCE'
         });
       } else if (error.message.includes('BAD_SERVICE')) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Invalid service code',
           code: 'INVALID_SERVICE'
         });
       }
 
-      res.status(500).json({ 
+      // Generic error - return 500 only for unexpected errors
+      res.status(500).json({
         error: 'Failed to purchase number',
         code: 'PURCHASE_FAILED',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Get active numbers with real-time SMS checking
-router.get('/active', 
+router.get('/active',
   authenticateToken,
   validationRules.pagination,
   handleValidationErrors,
   async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    
+
     try {
       const pool = getPool();
       const userId = req.user.id;
@@ -336,7 +343,7 @@ router.get('/active',
         if (number.activation_id && number.status === 'waiting') {
           try {
             const statusResult = await smsActivateService.getStatus(number.activation_id);
-            
+
             if (statusResult.code && number.sms_code !== statusResult.code) {
               // Update database with new SMS
               await pool.execute(
@@ -345,7 +352,7 @@ router.get('/active',
                  WHERE id = ?`,
                 [statusResult.code, statusResult.text || null, number.id]
               );
-              
+
               number.sms_code = statusResult.code;
               number.sms_text = statusResult.text;
               number.status = 'received';
@@ -363,13 +370,13 @@ router.get('/active',
                 }
               });
 
-              logger.info('📨 SMS received:', { 
-                userId, 
+              logger.info('📨 SMS received:', {
+                userId,
                 activationId: number.activation_id,
-                code: statusResult.code 
+                code: statusResult.code
               });
             }
-            
+
             // Check for expiry
             if (new Date() > new Date(number.expiry_date) && number.status === 'waiting') {
               await pool.execute(
@@ -396,7 +403,7 @@ router.get('/active',
             });
           }
         }
-        
+
         updatedNumbers.push({
           ...number,
           price: parseFloat(number.price || 0),
@@ -423,16 +430,16 @@ router.get('/active',
 
     } catch (error) {
       logger.error('❌ Active numbers error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to get active numbers',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Enhanced status check for specific number
-router.get('/:id/status', 
+router.get('/:id/status',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -446,7 +453,7 @@ router.get('/:id/status',
 
     try {
       const pool = getPool();
-      
+
       // Get number details
       const [numbers] = await pool.execute(
         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
@@ -454,7 +461,7 @@ router.get('/:id/status',
       );
 
       if (numbers.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Number not found',
           code: 'NUMBER_NOT_FOUND'
         });
@@ -466,7 +473,7 @@ router.get('/:id/status',
       if (number.activation_id && ['waiting', 'received'].includes(number.status)) {
         try {
           const statusResult = await smsActivateService.getStatus(number.activation_id);
-          
+
           // Update if status changed
           if (statusResult.code && statusResult.code !== number.sms_code) {
             await pool.execute(
@@ -509,16 +516,16 @@ router.get('/:id/status',
 
     } catch (error) {
       logger.error('❌ Status check error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to check status',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Enhanced cancel number with proper status handling
-router.post('/:id/cancel', 
+router.post('/:id/cancel',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -532,7 +539,7 @@ router.post('/:id/cancel',
 
     try {
       const pool = getPool();
-      
+
       // Get number details
       const [numbers] = await pool.execute(
         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
@@ -540,7 +547,7 @@ router.post('/:id/cancel',
       );
 
       if (numbers.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Number not found',
           code: 'NUMBER_NOT_FOUND'
         });
@@ -549,7 +556,7 @@ router.post('/:id/cancel',
       const number = numbers[0];
 
       if (!['waiting', 'received'].includes(number.status)) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Number cannot be cancelled in current status',
           code: 'INVALID_STATUS_FOR_CANCEL',
           currentStatus: number.status
@@ -563,7 +570,7 @@ router.post('/:id/cancel',
         // Cancel via SMS-Activate API
         if (number.activation_id) {
           await smsActivateService.setStatus(
-            number.activation_id, 
+            number.activation_id,
             smsActivateService.getActionCode('CANCEL_ACTIVATION')
           );
         }
@@ -592,9 +599,9 @@ router.post('/:id/cancel',
              (user_id, transaction_type, amount, reference_id, description, status, created_at)
              VALUES (?, 'refund', ?, ?, ?, 'completed', NOW())`,
             [
-              userId, 
-              refundAmount, 
-              number.activation_id, 
+              userId,
+              refundAmount,
+              number.activation_id,
               `Partial refund for cancelled number ${number.phone_number}`
             ]
           );
@@ -617,17 +624,17 @@ router.post('/:id/cancel',
             'SELECT balance FROM user_demo_balances WHERE user_id = ?',
             [userId]
           );
-          
+
           webSocketService.notifyBalanceUpdated(userId, newBalance[0].balance, refundAmount);
         }
 
-        logger.info('✅ Number cancelled successfully:', { 
-          userId, 
+        logger.info('✅ Number cancelled successfully:', {
+          userId,
           activationId: number.activation_id,
-          refundAmount 
+          refundAmount
         });
 
-        res.json({ 
+        res.json({
           success: true,
           message: 'Number cancelled successfully',
           refundAmount: refundAmount
@@ -640,16 +647,16 @@ router.post('/:id/cancel',
 
     } catch (error) {
       logger.error('❌ Cancel error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to cancel number',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Mark number as completed/used
-router.post('/:id/complete', 
+router.post('/:id/complete',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -663,14 +670,14 @@ router.post('/:id/complete',
 
     try {
       const pool = getPool();
-      
+
       const [numbers] = await pool.execute(
         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
         [id, userId]
       );
 
       if (numbers.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Number not found',
           code: 'NUMBER_NOT_FOUND'
         });
@@ -679,7 +686,7 @@ router.post('/:id/complete',
       const number = numbers[0];
 
       if (number.status !== 'received') {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Can only complete numbers with received SMS',
           code: 'INVALID_STATUS_FOR_COMPLETE',
           currentStatus: number.status
@@ -689,7 +696,7 @@ router.post('/:id/complete',
       // Mark as complete via SMS-Activate API
       if (number.activation_id) {
         await smsActivateService.setStatus(
-          number.activation_id, 
+          number.activation_id,
           smsActivateService.getActionCode('FINISH_ACTIVATION')
         );
       }
@@ -710,28 +717,28 @@ router.post('/:id/complete',
         }
       });
 
-      logger.info('✅ Number completed successfully:', { 
-        userId, 
-        activationId: number.activation_id 
+      logger.info('✅ Number completed successfully:', {
+        userId,
+        activationId: number.activation_id
       });
 
-      res.json({ 
+      res.json({
         success: true,
         message: 'Number marked as completed'
       });
 
     } catch (error) {
       logger.error('❌ Complete error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to complete number',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // NEW: Request retry for SMS
-router.post('/:id/retry', 
+router.post('/:id/retry',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -745,14 +752,14 @@ router.post('/:id/retry',
 
     try {
       const pool = getPool();
-      
+
       const [numbers] = await pool.execute(
         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
         [id, userId]
       );
 
       if (numbers.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Number not found',
           code: 'NUMBER_NOT_FOUND'
         });
@@ -761,7 +768,7 @@ router.post('/:id/retry',
       const number = numbers[0];
 
       if (number.status !== 'waiting') {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Can only request retry for waiting numbers',
           code: 'INVALID_STATUS_FOR_RETRY'
         });
@@ -769,7 +776,7 @@ router.post('/:id/retry',
 
       // Request retry via SMS-Activate API
       await smsActivateService.setStatus(
-        number.activation_id, 
+        number.activation_id,
         smsActivateService.getActionCode('REQUEST_RETRY')
       );
 
@@ -782,7 +789,7 @@ router.post('/:id/retry',
         [newExpiry, id]
       );
 
-      res.json({ 
+      res.json({
         success: true,
         message: 'SMS retry requested successfully',
         newExpiryDate: newExpiry
@@ -790,16 +797,16 @@ router.post('/:id/retry',
 
     } catch (error) {
       logger.error('❌ Retry error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to request retry',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // NEW: Get full SMS text
-router.get('/:id/full-sms', 
+router.get('/:id/full-sms',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -813,14 +820,14 @@ router.get('/:id/full-sms',
 
     try {
       const pool = getPool();
-      
+
       const [numbers] = await pool.execute(
         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
         [id, userId]
       );
 
       if (numbers.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Number not found',
           code: 'NUMBER_NOT_FOUND'
         });
@@ -829,7 +836,7 @@ router.get('/:id/full-sms',
       const number = numbers[0];
 
       if (number.status !== 'received') {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'SMS not received yet',
           code: 'SMS_NOT_RECEIVED'
         });
@@ -839,7 +846,7 @@ router.get('/:id/full-sms',
       if (!number.sms_text && number.activation_id) {
         try {
           const fullSmsResult = await smsActivateService.getFullSms(number.activation_id);
-          
+
           if (fullSmsResult.success) {
             await pool.execute(
               'UPDATE number_purchases SET sms_text = ? WHERE id = ?',
@@ -865,16 +872,16 @@ router.get('/:id/full-sms',
 
     } catch (error) {
       logger.error('❌ Full SMS error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to get full SMS',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Enhanced purchase history with filters and statistics
-router.get('/history', 
+router.get('/history',
   authenticateToken,
   [
     require('express-validator').query('page')
@@ -908,24 +915,24 @@ router.get('/history',
   ],
   handleValidationErrors,
   async (req, res) => {
-    const { 
-      page = 1, 
-      limit = 20, 
-      service, 
-      country, 
+    const {
+      page = 1,
+      limit = 20,
+      service,
+      country,
       status,
       dateFrom,
       dateTo,
       sortBy = 'purchase_date',
       sortOrder = 'DESC'
     } = req.query;
-    
+
     const userId = req.user.id;
     const offset = (page - 1) * limit;
 
     try {
       const pool = getPool();
-      
+
       // Build dynamic query
       let query = `
         SELECT np.*, 
@@ -937,9 +944,9 @@ router.get('/history',
         FROM number_purchases np
         WHERE np.user_id = ?
       `;
-      
+
       const params = [userId];
-      
+
       // Add filters
       if (service) {
         query += ' AND np.service_code = ?';
@@ -961,12 +968,12 @@ router.get('/history',
         query += ' AND np.purchase_date <= ?';
         params.push(dateTo);
       }
-      
+
       // Add sorting
       const validSortFields = ['purchase_date', 'price', 'status', 'service_code', 'country_code'];
       const sortField = validSortFields.includes(sortBy) ? sortBy : 'purchase_date';
       const order = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-      
+
       query += ` ORDER BY np.${sortField} ${order} LIMIT ? OFFSET ?`;
       params.push(parseInt(limit), offset);
 
@@ -975,7 +982,7 @@ router.get('/history',
       // Get total count with same filters
       let countQuery = 'SELECT COUNT(*) as total FROM number_purchases np WHERE np.user_id = ?';
       const countParams = [userId];
-      
+
       if (service) {
         countQuery += ' AND np.service_code = ?';
         countParams.push(service);
@@ -1037,7 +1044,7 @@ router.get('/history',
           average_price: parseFloat(stats[0].average_price || 0),
           min_price: parseFloat(stats[0].min_price || 0),
           max_price: parseFloat(stats[0].max_price || 0),
-          success_rate: stats[0].total_purchases > 0 
+          success_rate: stats[0].total_purchases > 0
             ? (stats[0].successful / stats[0].total_purchases * 100).toFixed(2)
             : 0
         },
@@ -1054,9 +1061,9 @@ router.get('/history',
 
     } catch (error) {
       logger.error('❌ History error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to get history',
-        message: error.message 
+        message: error.message
       });
     }
   }
@@ -1065,7 +1072,7 @@ router.get('/history',
 // NEW: Subscription management routes
 
 // Buy subscription
-router.post('/subscriptions/buy', 
+router.post('/subscriptions/buy',
   authenticateToken,
   [
     require('express-validator').body('service')
@@ -1095,7 +1102,7 @@ router.post('/subscriptions/buy',
       );
 
       if (!userBalance.length) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'SMS account not found',
           code: 'ACCOUNT_NOT_FOUND'
         });
@@ -1107,7 +1114,7 @@ router.post('/subscriptions/buy',
 
       const currentBalance = parseFloat(userBalance[0].balance || 0);
       if (currentBalance < subscriptionPrice) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Insufficient balance for subscription',
           code: 'INSUFFICIENT_BALANCE',
           required: subscriptionPrice,
@@ -1225,16 +1232,16 @@ router.post('/subscriptions/buy',
 
     } catch (error) {
       logger.error('❌ Subscription purchase error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to purchase subscription',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Get user subscriptions
-router.get('/subscriptions', 
+router.get('/subscriptions',
   authenticateToken,
   [
     require('express-validator').query('page')
@@ -1258,7 +1265,7 @@ router.get('/subscriptions',
 
     try {
       const pool = getPool();
-      
+
       let query = 'SELECT * FROM subscriptions WHERE user_id = ?';
       const params = [userId];
 
@@ -1282,7 +1289,7 @@ router.get('/subscriptions',
           );
           subscription.status = 'expired';
         }
-        
+
         updatedSubscriptions.push({
           ...subscription,
           price: parseFloat(subscription.price || 0),
@@ -1293,7 +1300,7 @@ router.get('/subscriptions',
       // Get total count
       let countQuery = 'SELECT COUNT(*) as total FROM subscriptions WHERE user_id = ?';
       const countParams = [userId];
-      
+
       if (status) {
         countQuery += ' AND status = ?';
         countParams.push(status);
@@ -1314,16 +1321,16 @@ router.get('/subscriptions',
 
     } catch (error) {
       logger.error('❌ Get subscriptions error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to get subscriptions',
-        message: error.message 
+        message: error.message
       });
     }
   }
 );
 
 // Cancel subscription
-router.post('/subscriptions/:id/cancel', 
+router.post('/subscriptions/:id/cancel',
   authenticateToken,
   [
     require('express-validator').param('id')
@@ -1337,7 +1344,7 @@ router.post('/subscriptions/:id/cancel',
 
     try {
       const pool = getPool();
-      
+
       // Get subscription details
       const [subscriptions] = await pool.execute(
         'SELECT * FROM subscriptions WHERE id = ? AND user_id = ?',
@@ -1345,7 +1352,7 @@ router.post('/subscriptions/:id/cancel',
       );
 
       if (subscriptions.length === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: 'Subscription not found',
           code: 'SUBSCRIPTION_NOT_FOUND'
         });
@@ -1354,7 +1361,7 @@ router.post('/subscriptions/:id/cancel',
       const subscription = subscriptions[0];
 
       if (subscription.status !== 'active') {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: 'Can only cancel active subscriptions',
           code: 'INVALID_STATUS_FOR_CANCEL',
           currentStatus: subscription.status
@@ -1375,16 +1382,16 @@ router.post('/subscriptions/:id/cancel',
         subscriptionId: subscription.subscription_id
       });
 
-      res.json({ 
+      res.json({
         success: true,
         message: 'Subscription cancelled successfully'
       });
 
     } catch (error) {
       logger.error('❌ Cancel subscription error:', error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to cancel subscription',
-        message: error.message 
+        message: error.message
       });
     }
   }
@@ -1393,21 +1400,21 @@ router.post('/subscriptions/:id/cancel',
 // Helper methods
 function calculateTimeRemaining(expiryDate) {
   if (!expiryDate) return 0;
-  
+
   const now = new Date();
   const expiry = new Date(expiryDate);
   const diff = expiry.getTime() - now.getTime();
-  
+
   return Math.max(0, Math.floor(diff / 1000)); // Return seconds
 }
 
 function calculateDaysRemaining(endDate) {
   if (!endDate) return 0;
-  
+
   const now = new Date();
   const end = new Date(endDate);
   const diff = end.getTime() - now.getTime();
-  
+
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24))); // Return days
 }
 
