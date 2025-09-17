@@ -9,6 +9,7 @@ import RecentActivity from '@/components/dashboard/RecentActivity';
 import QuickActions from '@/components/dashboard/QuickActions';
 import BalanceWidget from '@/components/dashboard/BalanceWidget';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { PageLoader } from '@/components/common/LoadingSpinner';
 
 const Dashboard: React.FC = () => {
   useDocumentTitle("SMS Verification Dashboard");
@@ -87,7 +88,7 @@ const Dashboard: React.FC = () => {
   if (loading && !stats) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <PageLoader message='Loading dashboard...' />
       </div>
     );
   }
