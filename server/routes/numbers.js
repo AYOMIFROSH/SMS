@@ -17,6 +17,7 @@ const router = express.Router();
 router.use(rateLimiters.sms);
 
 // UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
+// UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
 router.post('/purchase',
   authenticateToken,
   [
@@ -135,7 +136,7 @@ router.post('/purchase',
         const numberData = await smsActivateService.getNumber(
           service,
           country,
-          operator,
+          operator
         );
 
         const { id: activationId, number } = numberData;
@@ -271,7 +272,6 @@ router.post('/purchase',
         throw purchaseError;
       }
 
-      // REPLACE the existing catch block with this enhanced version:
     } catch (error) {
       logger.error('❌ Purchase error with bonus system:', {
         error: error.message,
@@ -285,13 +285,14 @@ router.post('/purchase',
       // Enhanced error handling with proper status codes
       if (error.message.includes('NO_NUMBERS')) {
         return res.status(400).json({
-          error: `No numbers available for this service/country${operator ? '/operator' : ''} combination`,
+          error: `No numbers available for ${operator ? operator + ' operator in ' : ''}this service/country combination`,
           code: 'NO_NUMBERS_AVAILABLE',
-          suggestion: operator ? 'Try selecting "Any Operator" option' : 'Try a different service or country',
+          suggestion: operator && operator !== '' ? 'Try selecting "Any Operator" option for better availability' : 'Try a different service or country',
           details: {
-            service,
+            service: service.toUpperCase(),
             country,
-            operator: operator || null
+            operator: operator || 'Any',
+            availableCount: 0
           }
         });
       } else if (error.message.includes('NO_BALANCE')) {
@@ -892,17 +893,18 @@ router.get('/history',
       .optional()
       .isInt({ min: 1, max: 100 })
       .withMessage('Limit must be 1-100'),
+    // Simpler fix - just allow empty strings in validation
     require('express-validator').query('service')
-      .optional()
-      .matches(/^[a-zA-Z0-9_-]+$/)
+      .optional({ nullable: true, checkFalsy: true }) // This allows empty strings
+      .matches(/^[a-zA-Z0-9_-]*$/)  // Note the * instead of + to allow empty
       .withMessage('Invalid service format'),
     require('express-validator').query('country')
-      .optional()
-      .matches(/^[0-9]+$/)
+      .optional({ nullable: true, checkFalsy: true })
+      .matches(/^[0-9]*$/)  // Allow empty
       .withMessage('Country must be numeric'),
     require('express-validator').query('status')
-      .optional()
-      .isIn(['waiting', 'received', 'cancelled', 'expired', 'used'])
+      .optional({ nullable: true, checkFalsy: true })
+      .isIn(['', 'waiting', 'received', 'cancelled', 'expired', 'used']) // Include empty string
       .withMessage('Invalid status'),
     require('express-validator').query('dateFrom')
       .optional()
