@@ -1,11 +1,11 @@
-// src/pages/ActiveNumbers.tsx
+// Update the ActiveNumbers.tsx - Add refresh functionality
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
-import { fetchActiveNumbers, cancelNumber, completeNumber } from '@/store/slices/numbersSlice';
-import NumberCard from '@/components/numbers/NumberCards';
+import { fetchActiveNumbers, cancelNumber, completeNumber, refreshNumber } from '@/store/slices/numbersSlice';import NumberCard from '@/components/numbers/NumberCards';
 import { RefreshCw, Smartphone, AlertCircle } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import toast from 'react-hot-toast';
 
 const ActiveNumbers: React.FC = () => {
   useDocumentTitle("SMS Active Numbers");
@@ -14,6 +14,8 @@ const ActiveNumbers: React.FC = () => {
     (state: RootState) => state.numbers
   );
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [cancellingIds, setCancellingIds] = useState<Set<number>>(new Set());
+  const [refreshingIds, setRefreshingIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     // Fix: Pass the required arguments
@@ -38,21 +40,56 @@ const ActiveNumbers: React.FC = () => {
   };
 
   const handleCancel = async (id: number) => {
+    setCancellingIds(prev => new Set(prev).add(id));
     try {
       await dispatch(cancelNumber(id)).unwrap();
+      toast.success('Number cancelled and refunded successfully!', {
+        icon: '💰',
+        duration: 5000
+      });
       handleRefresh();
-      dispatch(fetchActiveNumbers({ page: 1, limit: 20 })); // Fix: Pass arguments
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to cancel number:', error);
+      toast.error(error || 'Failed to cancel number');
+    } finally {
+      setCancellingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     }
   };
 
   const handleComplete = async (id: number) => {
     try {
       await dispatch(completeNumber(id)).unwrap();
-      dispatch(fetchActiveNumbers({ page: 1, limit: 20 })); // Fix: Pass arguments
+      toast.success('Number marked as complete!');
+      dispatch(fetchActiveNumbers({ page: 1, limit: 20 }));
     } catch (error) {
       console.error('Failed to complete number:', error);
+      toast.error('Failed to complete number');
+    }
+  };
+
+  const handleRefreshNumber = async (id: number) => {
+    setRefreshingIds(prev => new Set(prev).add(id));
+    try {
+      await dispatch(refreshNumber(id)).unwrap();
+      toast.success('Number refreshed successfully! Timer extended.', {
+        icon: '🔄',
+        duration: 5000
+      });
+      // Refresh the list to get updated data
+      dispatch(fetchActiveNumbers({ page: 1, limit: 20 }));
+    } catch (error: any) {
+      console.error('Failed to refresh number:', error);
+      toast.error(error || 'Failed to refresh number');
+    } finally {
+      setRefreshingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     }
   };
 
@@ -150,6 +187,23 @@ const ActiveNumbers: React.FC = () => {
         </div>
       </div>
 
+      {/* Important Notice for Users */}
+      {waitingNumbers.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-start space-x-3">
+            <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-blue-800">💡 Important Reminder</h3>
+              <p className="text-sm text-blue-700 mt-1">
+                If you don't receive an SMS code for any of your active numbers, make sure to <strong>cancel</strong> them 
+                to get a <strong>full refund</strong>. You can cancel after 4 minutes of purchase. 
+                You can also try <strong>refreshing</strong> a number to extend the timer and potentially get a new number.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Numbers - Made responsive */}
       {activeNumbers.length === 0 ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 sm:p-12">
@@ -189,6 +243,9 @@ const ActiveNumbers: React.FC = () => {
                     number={number}
                     onCancel={() => handleCancel(number.id)}
                     onComplete={() => handleComplete(number.id)}
+                    onRefresh={() => handleRefreshNumber(number.id)}
+                    cancelLoading={cancellingIds.has(number.id)}
+                    refreshLoading={refreshingIds.has(number.id)}
                   />
                 ))}
               </div>
@@ -213,6 +270,9 @@ const ActiveNumbers: React.FC = () => {
                     number={number}
                     onCancel={() => handleCancel(number.id)}
                     onComplete={() => handleComplete(number.id)}
+                    onRefresh={() => handleRefreshNumber(number.id)}
+                    cancelLoading={cancellingIds.has(number.id)}
+                    refreshLoading={refreshingIds.has(number.id)}
                   />
                 ))}
               </div>

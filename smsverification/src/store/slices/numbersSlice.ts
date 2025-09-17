@@ -162,6 +162,22 @@ export const completeNumber = createAsyncThunk(
   }
 );
 
+// Refresh number (get new number or reset timer)
+export const refreshNumber = createAsyncThunk(
+  'numbers/refresh',
+  async (id: number, { rejectWithValue }) => {
+    try {
+      console.log('🔄 Refreshing number ID:', id);
+      const response = await numbersApi.refresh(id);
+      console.log('✅ Number refreshed:', response);
+      return { id, ...response };
+    } catch (error: any) {
+      console.error('❌ Failed to refresh number:', error);
+      return rejectWithValue(error.response?.data?.error || error.message || 'Failed to refresh number');
+    }
+  }
+);
+
 // Retry SMS for number
 export const retryNumber = createAsyncThunk(
   'numbers/retry',
@@ -408,6 +424,27 @@ const numbersSlice = createSlice({
       .addCase(completeNumber.rejected, (state, action) => {
         state.error = action.payload as string || 'Failed to complete number';
         console.error('❌ Complete failed:', state.error);
+      })
+
+      .addCase(refreshNumber.pending, (state) => {
+        state.error = null;
+      })
+      .addCase(refreshNumber.fulfilled, (state, action) => {
+        const { id, newExpiryDate } = action.payload;
+        const number = state.activeNumbers.find(n => n.id === id);
+        if (number && newExpiryDate) {
+          number.expiry_date = newExpiryDate;
+          // Clear any previous SMS data since we refreshed
+          number.sms_code = null;
+          number.sms_text = null;
+          number.received_at = null;
+        }
+        state.error = null;
+        console.log('✅ Number refresh completed for:', id);
+      })
+      .addCase(refreshNumber.rejected, (state, action) => {
+        state.error = action.payload as string || 'Failed to refresh number';
+        console.error('❌ Number refresh failed:', state.error);
       })
 
       // Retry Number

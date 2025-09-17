@@ -33,11 +33,11 @@ export interface NumberPurchase {
   operator?: string;
   price: number;
   status: 'waiting' | 'received' | 'cancelled' | 'expired' | 'used';
-  sms_code?: string;
-  sms_text?: string;
+  sms_code?: string | null;
+  sms_text?: string | null;
   purchase_date: string;
   expiry_date?: string;
-  received_at?: string;
+  received_at?: string | null;
   time_remaining?: number;
 }
 

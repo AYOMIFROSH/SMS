@@ -1,4 +1,4 @@
-// src/components/numbers/NumberCard.tsx
+// src/components/numbers/NumberCard.tsx - Updated with new functionality
 import React, { useState, useEffect } from 'react';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { format, formatDistance } from 'date-fns';
@@ -10,6 +10,8 @@ import {
   X,
   CheckCircle,
   AlertCircle,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { NumberPurchase } from '@/types';
 import toast from 'react-hot-toast';
@@ -18,14 +20,25 @@ interface NumberCardProps {
   number: NumberPurchase;
   onCancel: () => void;
   onComplete: () => void;
+  onRefresh?: () => void; // Add refresh callback
+  cancelLoading?: boolean; // Add loading states
+  refreshLoading?: boolean;
 }
 
-const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete }) => {
+const NumberCard: React.FC<NumberCardProps> = ({ 
+  number, 
+  onCancel, 
+  onComplete, 
+  onRefresh,
+  cancelLoading = false,
+  refreshLoading = false
+}) => {
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('');
+  const [minutesRemaining, setMinutesRemaining] = useState<number>(0);
 
-  // Calculate time remaining
+  // Calculate time remaining and minutes for 4-minute rule
   useEffect(() => {
     if (!number.expiry_date) return;
 
@@ -35,9 +48,15 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
 
       if (now > expiry) {
         setTimeLeft('Expired');
+        setMinutesRemaining(0);
         return;
       }
 
+      const diffInMs = expiry.getTime() - now.getTime();
+      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+      
+      setMinutesRemaining(diffInMinutes);
+      
       const distance = formatDistance(expiry, now, { addSuffix: false });
       setTimeLeft(distance);
     };
@@ -47,6 +66,9 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
 
     return () => clearInterval(interval);
   }, [number.expiry_date]);
+
+  // Calculate if cancel button should be enabled (after 4 minutes = when remaining time ≤ 16 minutes)
+  const canCancel = minutesRemaining <= 16 && minutesRemaining > 0;
 
   const handleCopyNumber = () => {
     setCopiedNumber(true);
@@ -188,13 +210,34 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
       {/* Timer */}
       {number.status === 'waiting' && timeLeft && (
         <div className="mb-4">
-          <div className={`flex items-center justify-between p-3 rounded-md ${timeLeft === 'Expired' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
-            }`}>
+          <div className={`flex items-center justify-between p-3 rounded-md ${
+            timeLeft === 'Expired' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'
+          }`}>
             <div className="flex items-center space-x-2">
               <Clock className="h-4 w-4" />
               <span className="text-sm font-medium">
                 {timeLeft === 'Expired' ? 'Expired' : `${timeLeft} remaining`}
               </span>
+            </div>
+          </div>
+          
+          {/* Cancel availability warning */}
+          {!canCancel && minutesRemaining > 16 && (
+            <div className="mt-2 text-xs text-amber-600 bg-amber-50 p-2 rounded">
+              ⚠️ Cancel option available in {minutesRemaining - 16} minutes
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Warning about cancellation for refund */}
+      {number.status === 'waiting' && (
+        <div className="mb-4 text-xs text-blue-600 bg-blue-50 p-3 rounded-md border border-blue-200">
+          <div className="flex items-start space-x-2">
+            <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Important:</p>
+              <p>If you don't receive an SMS code, make sure to cancel this number to get a full refund of ${number.price?.toFixed(4)}.</p>
             </div>
           </div>
         </div>
@@ -219,31 +262,46 @@ const NumberCard: React.FC<NumberCardProps> = ({ number, onCancel, onComplete })
       </div>
 
       {/* Actions */}
-      {/* Actions */}
       <div className="flex space-x-2">
         {number.status === 'waiting' && (
           <>
             <button
               onClick={onCancel}
-              className="flex-1 px-3 py-2 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
+              disabled={!canCancel || cancelLoading}
+              className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors flex items-center justify-center space-x-2 ${
+                !canCancel || cancelLoading
+                  ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                  : 'text-red-600 bg-red-50 border border-red-200 hover:bg-red-100'
+              }`}
+              title={!canCancel ? `Cancel available in ${Math.max(0, 20 - minutesRemaining)} minutes` : 'Cancel and get full refund'}
             >
-              Cancel
+              {cancelLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Cancelling...</span>
+                </>
+              ) : (
+                <span>Cancel</span>
+              )}
             </button>
+            
             <button
-              onClick={() => {
-                // Add refresh functionality
-                toast.promise(
-                  fetch(`/api/numbers/${number.id}/refresh`, { method: 'POST' }),
-                  {
-                    loading: 'Refreshing number...',
-                    success: 'Number refreshed successfully!',
-                    error: 'Failed to refresh number'
-                  }
-                );
-              }}
-              className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+              onClick={onRefresh}
+              disabled={refreshLoading}
+              className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
+              title="Refresh number and extend timer"
             >
-              Refresh
+              {refreshLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Refreshing...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Refresh</span>
+                </>
+              )}
             </button>
           </>
         )}
