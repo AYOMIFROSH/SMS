@@ -320,19 +320,12 @@ const numbersSlice = createSlice({
         console.log('✅ Purchase: Completed successfully');
       })
       // In numbersSlice.ts, update the purchaseNumber.rejected case:
-      .addCase(purchaseNumber.rejected, (state, action) => {
-        state.purchasing = false;
-        state.error = action.payload as string || 'Failed to purchase number';
-
-        // Show toast for specific errors
-        const errorMessage = action.payload as string;
-        if (errorMessage.includes('No numbers available')) {
-          // Don't set generic error for this case, let the component handle it
-          state.error = null;
-        }
-
-        console.error('❌ Purchase: Failed with error:', state.error);
-      })
+  // In numbersSlice.ts, make sure purchaseNumber.rejected looks like this:
+.addCase(purchaseNumber.rejected, (state, action) => {
+  state.purchasing = false;
+  state.error = action.payload as string || 'Failed to purchase number';
+  console.error('❌ Purchase: Failed with error:', state.error);
+})
       // Fetch Active Numbers
       .addCase(fetchActiveNumbers.pending, (state) => {
         state.loading = true;

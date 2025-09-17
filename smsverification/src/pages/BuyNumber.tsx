@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
+import { useNavigate } from 'react-router-dom';
 import {
   fetchServices,
   fetchCountries,
@@ -27,6 +28,8 @@ const BuyNumber: React.FC = () => {
   useDocumentTitle("SMS Purchase Numbers");
 
   const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate(); 
+
   const {
     services,
     countries,
@@ -43,6 +46,7 @@ const BuyNumber: React.FC = () => {
   } = useSelector((state: RootState) => state.services);
 
   const { purchasing } = useSelector((state: RootState) => state.numbers);
+  const numbersError = useSelector((state: RootState) => state.numbers.error);
 
   // Use payment hook for real-time balance
   const payment = usePayment({ autoFetch: true, enableWebSocket: true });
@@ -152,6 +156,8 @@ const BuyNumber: React.FC = () => {
       dispatch(setSelectedOperator(null));
       setStep('country');
       setMaxPrice(null);
+
+      navigate('/active-numbers'); 
 
     } catch (error: any) {
       console.error('❌ Purchase failed:', error);
@@ -378,10 +384,10 @@ const BuyNumber: React.FC = () => {
                 return (
                   <React.Fragment key={num}>
                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${isActive
-                        ? 'bg-primary-600 text-white'
-                        : isCompleted
-                          ? 'bg-green-500 text-white'
-                          : 'bg-gray-200 text-gray-500'
+                      ? 'bg-primary-600 text-white'
+                      : isCompleted
+                        ? 'bg-green-500 text-white'
+                        : 'bg-gray-200 text-gray-500'
                       }`}>
                       {isCompleted ? '✓' : num}
                     </div>
@@ -637,14 +643,14 @@ const BuyNumber: React.FC = () => {
             )}
 
             {/* Error Display - Add this before the purchase button */}
-            {error && (
+            {numbersError && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-start space-x-3">
                   <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-red-800">Purchase Error</p>
-                    <p className="text-sm text-red-700 mt-1">{error}</p>
-                    {error.includes('No numbers available') && selectedOperator && selectedOperator !== '' && (
+                    <p className="text-sm text-red-700 mt-1">{numbersError}</p>
+                    {numbersError.includes('No numbers available') && selectedOperator && selectedOperator !== '' && (
                       <button
                         onClick={() => {
                           dispatch(setSelectedOperator(''));
@@ -659,15 +665,14 @@ const BuyNumber: React.FC = () => {
                 </div>
               </div>
             )}
-
             {/* Action Buttons - Mobile Optimized with enhanced checks */}
             <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 mt-6">
               <button
                 onClick={handlePurchase}
                 disabled={purchasing || !canAfford() || pricesLoading || payment.loading.balance}
                 className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${purchasing || !canAfford() || pricesLoading || payment.loading.balance
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-primary-600 text-white hover:bg-primary-700'
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-primary-600 text-white hover:bg-primary-700'
                   }`}
               >
                 {purchasing ? (
@@ -772,10 +777,10 @@ const StepIndicator: React.FC<{
 }> = ({ step, title, isActive, isCompleted }) => (
   <div className={`flex items-center space-x-2 ${isActive ? 'text-primary-600' : isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
     <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${isActive
-        ? 'bg-primary-600 text-white'
-        : isCompleted
-          ? 'bg-green-500 text-white'
-          : 'bg-gray-200 text-gray-500'
+      ? 'bg-primary-600 text-white'
+      : isCompleted
+        ? 'bg-green-500 text-white'
+        : 'bg-gray-200 text-gray-500'
       }`}>
       {isCompleted ? <CheckCircle className="w-4 h-4" /> : step}
     </div>
