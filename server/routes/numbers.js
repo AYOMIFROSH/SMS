@@ -1331,13 +1331,15 @@ router.get('/subscriptions',
   }
 );
 
-// Cancel subscription
-router.post('/subscriptions/:id/cancel',
+// Add this new endpoint to routes/numbers.js after the retry endpoint
+
+// NEW: Refresh number (get new number with same activation)
+router.post('/:id/refresh',
   authenticateToken,
   [
     require('express-validator').param('id')
       .isInt({ min: 1 })
-      .withMessage('Invalid subscription ID')
+      .withMessage('Invalid number ID')
   ],
   handleValidationErrors,
   async (req, res) => {
@@ -1347,52 +1349,271 @@ router.post('/subscriptions/:id/cancel',
     try {
       const pool = getPool();
 
-      // Get subscription details
-      const [subscriptions] = await pool.execute(
-        'SELECT * FROM subscriptions WHERE id = ? AND user_id = ?',
+      // Get number details
+      const [numbers] = await pool.execute(
+        'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
         [id, userId]
       );
 
-      if (subscriptions.length === 0) {
+      if (numbers.length === 0) {
         return res.status(404).json({
-          error: 'Subscription not found',
-          code: 'SUBSCRIPTION_NOT_FOUND'
+          error: 'Number not found',
+          code: 'NUMBER_NOT_FOUND'
         });
       }
 
-      const subscription = subscriptions[0];
+      const number = numbers[0];
 
-      if (subscription.status !== 'active') {
+      if (number.status !== 'waiting') {
         return res.status(400).json({
-          error: 'Can only cancel active subscriptions',
-          code: 'INVALID_STATUS_FOR_CANCEL',
-          currentStatus: subscription.status
+          error: 'Can only refresh waiting numbers',
+          code: 'INVALID_STATUS_FOR_REFRESH',
+          currentStatus: number.status
         });
       }
 
-      // Cancel via SMS-Activate API
-      await smsActivateService.cancelSubscription(subscription.subscription_id);
+      // Check if number has not expired
+      if (new Date() > new Date(number.expiry_date)) {
+        return res.status(400).json({
+          error: 'Cannot refresh expired number',
+          code: 'NUMBER_EXPIRED'
+        });
+      }
 
-      // Update database
-      await pool.execute(
-        'UPDATE subscriptions SET status = ?, updated_at = NOW() WHERE id = ?',
-        ['cancelled', id]
+      // Request new number via SMS-Activate API (setStatus with action 3 = REQUEST_RETRY)
+      await smsActivateService.setStatus(
+        number.activation_id,
+        smsActivateService.getActionCode('REQUEST_RETRY')
       );
 
-      logger.info('✅ Subscription cancelled successfully:', {
+      // Get the new number details
+      const statusResult = await smsActivateService.getStatus(number.activation_id);
+      
+      // Note: The API documentation shows that REQUEST_RETRY might give a new number
+      // We need to check if we get updated number information
+      let updatedNumber = number.phone_number;
+      
+      // For refresh, we typically extend the expiry time
+      const newExpiry = new Date();
+      newExpiry.setMinutes(newExpiry.getMinutes() + 20);
+
+      // Update database with new expiry and reset any previous SMS data
+      await pool.execute(
+        `UPDATE number_purchases 
+         SET expiry_date = ?, 
+             sms_code = NULL, 
+             sms_text = NULL,
+             received_at = NULL,
+             updated_at = NOW()
+         WHERE id = ?`,
+        [newExpiry, id]
+      );
+
+      // Send WebSocket notification
+      webSocketService.sendToUser(userId, {
+        type: 'number_refreshed',
+        data: {
+          activationId: number.activation_id,
+          phoneNumber: updatedNumber,
+          purchaseId: id,
+          newExpiryDate: newExpiry,
+          service: number.service_code
+        }
+      });
+
+      logger.info('✅ Number refreshed successfully:', {
         userId,
-        subscriptionId: subscription.subscription_id
+        activationId: number.activation_id,
+        purchaseId: id
       });
 
       res.json({
         success: true,
-        message: 'Subscription cancelled successfully'
+        message: 'Number refreshed successfully',
+        data: {
+          newExpiryDate: newExpiry,
+          phoneNumber: updatedNumber
+        }
       });
 
     } catch (error) {
-      logger.error('❌ Cancel subscription error:', error);
+      logger.error('❌ Refresh number error:', error);
       res.status(500).json({
-        error: 'Failed to cancel subscription',
+        error: 'Failed to refresh number',
+        message: error.message
+      });
+    }
+  }
+);
+
+// REPLACE the existing cancel endpoint in routes/numbers.js with this updated version:
+
+// Enhanced cancel number with proper refund to user balance
+router.post('/:id/cancel',
+  authenticateToken,
+  [
+    require('express-validator').param('id')
+      .isInt({ min: 1 })
+      .withMessage('Invalid number ID')
+  ],
+  handleValidationErrors,
+  async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    try {
+      const pool = getPool();
+
+      // Get number details
+      const [numbers] = await pool.execute(
+        'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
+        [id, userId]
+      );
+
+      if (numbers.length === 0) {
+        return res.status(404).json({
+          error: 'Number not found',
+          code: 'NUMBER_NOT_FOUND'
+        });
+      }
+
+      const number = numbers[0];
+
+      if (!['waiting', 'received'].includes(number.status)) {
+        return res.status(400).json({
+          error: 'Number cannot be cancelled in current status',
+          code: 'INVALID_STATUS_FOR_CANCEL',
+          currentStatus: number.status
+        });
+      }
+
+      // Calculate time elapsed since purchase (for 4-minute rule validation)
+      const purchaseTime = new Date(number.purchase_date).getTime();
+      const currentTime = Date.now();
+      const timeElapsed = (currentTime - purchaseTime) / 1000 / 60; // in minutes
+
+      if (timeElapsed < 4) {
+        return res.status(400).json({
+          error: 'Cannot cancel within first 4 minutes of purchase',
+          code: 'CANCEL_TOO_EARLY',
+          timeElapsed: Math.floor(timeElapsed),
+          minimumWait: 4
+        });
+      }
+
+      // Start transaction for atomic operation
+      await pool.execute('START TRANSACTION');
+
+      try {
+        // Cancel via SMS-Activate API
+        if (number.activation_id) {
+          await smsActivateService.setStatus(
+            number.activation_id,
+            smsActivateService.getActionCode('CANCEL_ACTIVATION')
+          );
+        }
+
+        // Update number status to cancelled
+        await pool.execute(
+          'UPDATE number_purchases SET status = ?, updated_at = NOW() WHERE id = ?',
+          ['cancelled', id]
+        );
+
+        // REFUND: Return the TOTAL amount user paid (real price + 100% bonus)
+        const refundAmount = parseFloat(number.price || 0);
+
+        if (refundAmount > 0) {
+          // Get current balance
+          const [currentBalance] = await pool.execute(
+            'SELECT balance FROM user_demo_balances WHERE user_id = ?',
+            [userId]
+          );
+
+          const balanceBefore = parseFloat(currentBalance[0]?.balance || 0);
+          const balanceAfter = balanceBefore + refundAmount;
+
+          // Update user balance
+          await pool.execute(
+            `UPDATE user_demo_balances 
+             SET balance = balance + ?,
+                 last_transaction_at = NOW()
+             WHERE user_id = ?`,
+            [refundAmount, userId]
+          );
+
+          // Add refund transaction record
+          await pool.execute(
+            `INSERT INTO transactions 
+             (user_id, transaction_type, amount, balance_before, balance_after,
+              reference_id, description, status, created_at)
+             VALUES (?, 'refund', ?, ?, ?, ?, ?, 'completed', NOW())`,
+            [
+              userId,
+              refundAmount,
+              balanceBefore,
+              balanceAfter,
+              number.activation_id,
+              `Refund for cancelled SMS number ${number.phone_number} (${number.service_code})`
+            ]
+          );
+
+          logger.info('💰 Refund processed:', {
+            userId,
+            activationId: number.activation_id,
+            refundAmount,
+            balanceBefore,
+            balanceAfter
+          });
+        }
+
+        await pool.execute('COMMIT');
+
+        // Send WebSocket notifications
+        webSocketService.sendToUser(userId, {
+          type: 'number_cancelled',
+          data: {
+            activationId: number.activation_id,
+            phoneNumber: number.phone_number,
+            purchaseId: id,
+            refundAmount
+          }
+        });
+
+        // Notify balance update
+        if (refundAmount > 0) {
+          const [newBalance] = await pool.execute(
+            'SELECT balance FROM user_demo_balances WHERE user_id = ?',
+            [userId]
+          );
+
+          webSocketService.notifyBalanceUpdated(userId, newBalance[0].balance, refundAmount);
+        }
+
+        logger.info('✅ Number cancelled successfully with refund:', {
+          userId,
+          activationId: number.activation_id,
+          refundAmount,
+          purchaseId: id
+        });
+
+        res.json({
+          success: true,
+          message: 'Number cancelled successfully',
+          data: {
+            refundAmount,
+            newStatus: 'cancelled'
+          }
+        });
+
+      } catch (cancelError) {
+        await pool.execute('ROLLBACK');
+        throw cancelError;
+      }
+
+    } catch (error) {
+      logger.error('❌ Cancel error:', error);
+      res.status(500).json({
+        error: 'Failed to cancel number',
         message: error.message
       });
     }
