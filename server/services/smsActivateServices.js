@@ -130,7 +130,7 @@ class SmsActivateService {
       
       const response = await axios.get(this.apiUrl, {
         params: requestParams,
-        timeout: 45000, // Increased timeout
+        timeout: 2000, // Increased timeout
         headers: {
           'User-Agent': 'SMS-Dashboard-Service/1.0',
           'Accept': 'application/json, text/plain, */*',
