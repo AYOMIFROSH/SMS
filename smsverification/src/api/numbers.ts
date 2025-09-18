@@ -135,20 +135,6 @@ export const numbersApi = {
     }
   },
 
-  refresh: async (id: number) => {
-    const response = await client.post(`/numbers/${id}/refresh`);
-    
-    if (response.data.success) {
-      return {
-        message: response.data.message,
-        newExpiryDate: response.data.data.newExpiryDate,
-        phoneNumber: response.data.data.phoneNumber
-      };
-    } else {
-      throw new Error(response.data.error || 'Failed to refresh number');
-    }
-  },
-
   // Subscription management
   subscriptions: {
     buy: async (data: {

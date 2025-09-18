@@ -1,4 +1,4 @@
-// src/components/numbers/NumberCard.tsx - Updated with new functionality
+// src/components/numbers/NumberCard.tsx - UPDATED: Remove refresh, focus on cancel
 import React, { useState, useEffect } from 'react';
 import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { format, formatDistance } from 'date-fns';
@@ -10,7 +10,6 @@ import {
   X,
   CheckCircle,
   AlertCircle,
-  RefreshCw,
   Loader2,
 } from 'lucide-react';
 import { NumberPurchase } from '@/types';
@@ -20,18 +19,14 @@ interface NumberCardProps {
   number: NumberPurchase;
   onCancel: () => void;
   onComplete: () => void;
-  onRefresh?: () => void; // Add refresh callback
-  cancelLoading?: boolean; // Add loading states
-  refreshLoading?: boolean;
+  cancelLoading?: boolean;
 }
 
 const NumberCard: React.FC<NumberCardProps> = ({ 
   number, 
   onCancel, 
   onComplete, 
-  onRefresh,
-  cancelLoading = false,
-  refreshLoading = false
+  cancelLoading = false
 }) => {
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
@@ -230,14 +225,16 @@ const NumberCard: React.FC<NumberCardProps> = ({
         </div>
       )}
 
-      {/* Warning about cancellation for refund */}
+      {/* Important info about SMS behavior */}
       {number.status === 'waiting' && (
         <div className="mb-4 text-xs text-blue-600 bg-blue-50 p-3 rounded-md border border-blue-200">
           <div className="flex items-start space-x-2">
             <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium">Important:</p>
-              <p>If you don't receive an SMS code, make sure to cancel this number to get a full refund of ${number.price?.toFixed(4)}.</p>
+              <p className="font-medium">Important Info:</p>
+              <p className="mt-1">• This number can receive multiple SMS during the active period</p>
+              <p>• If no SMS received, cancel for full refund of ${number.price?.toFixed(4)}</p>
+              <p>• Numbers may be reactivated after expiry (if available)</p>
             </div>
           </div>
         </div>
@@ -261,49 +258,28 @@ const NumberCard: React.FC<NumberCardProps> = ({
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Actions - Simplified to only cancel and complete */}
       <div className="flex space-x-2">
         {number.status === 'waiting' && (
-          <>
-            <button
-              onClick={onCancel}
-              disabled={!canCancel || cancelLoading}
-              className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors flex items-center justify-center space-x-2 ${
-                !canCancel || cancelLoading
-                  ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
-                  : 'text-red-600 bg-red-50 border border-red-200 hover:bg-red-100'
-              }`}
-              title={!canCancel ? `Cancel available in ${Math.max(0, 20 - minutesRemaining)} minutes` : 'Cancel and get full refund'}
-            >
-              {cancelLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Cancelling...</span>
-                </>
-              ) : (
-                <span>Cancel</span>
-              )}
-            </button>
-            
-            <button
-              onClick={onRefresh}
-              disabled={refreshLoading}
-              className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
-              title="Refresh number and extend timer"
-            >
-              {refreshLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Refreshing...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4" />
-                  <span>Refresh</span>
-                </>
-              )}
-            </button>
-          </>
+          <button
+            onClick={onCancel}
+            disabled={!canCancel || cancelLoading}
+            className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-colors flex items-center justify-center space-x-2 ${
+              !canCancel || cancelLoading
+                ? 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                : 'text-red-600 bg-red-50 border border-red-200 hover:bg-red-100'
+            }`}
+            title={!canCancel ? `Cancel available in ${Math.max(0, 20 - minutesRemaining)} minutes` : 'Cancel and get full refund'}
+          >
+            {cancelLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Cancelling...</span>
+              </>
+            ) : (
+              <span>Cancel & Refund</span>
+            )}
+          </button>
         )}
 
         {number.status === 'received' && (

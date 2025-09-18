@@ -1,8 +1,9 @@
-// Update the ActiveNumbers.tsx - Add refresh functionality
+// src/pages/ActiveNumbers.tsx - UPDATED: Remove refresh functionality
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
-import { fetchActiveNumbers, cancelNumber, completeNumber, refreshNumber } from '@/store/slices/numbersSlice';import NumberCard from '@/components/numbers/NumberCards';
+import { fetchActiveNumbers, cancelNumber, completeNumber } from '@/store/slices/numbersSlice';
+import NumberCard from '@/components/numbers/NumberCards';
 import { RefreshCw, Smartphone, AlertCircle } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import toast from 'react-hot-toast';
@@ -15,10 +16,8 @@ const ActiveNumbers: React.FC = () => {
   );
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [cancellingIds, setCancellingIds] = useState<Set<number>>(new Set());
-  const [refreshingIds, setRefreshingIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    // Fix: Pass the required arguments
     dispatch(fetchActiveNumbers({ page: 1, limit: 20 }));
 
     let interval: ReturnType<typeof setInterval> | undefined;
@@ -43,11 +42,12 @@ const ActiveNumbers: React.FC = () => {
     setCancellingIds(prev => new Set(prev).add(id));
     try {
       await dispatch(cancelNumber(id)).unwrap();
-      toast.success('Number cancelled and refunded successfully!', {
+      toast.success('Number cancelled and fully refunded!', {
         icon: '💰',
         duration: 5000
       });
-      handleRefresh();
+      // Refresh the list after successful cancel
+      dispatch(fetchActiveNumbers({ page: 1, limit: 20 }));
     } catch (error: any) {
       console.error('Failed to cancel number:', error);
       toast.error(error || 'Failed to cancel number');
@@ -71,28 +71,6 @@ const ActiveNumbers: React.FC = () => {
     }
   };
 
-  const handleRefreshNumber = async (id: number) => {
-    setRefreshingIds(prev => new Set(prev).add(id));
-    try {
-      await dispatch(refreshNumber(id)).unwrap();
-      toast.success('Number refreshed successfully! Timer extended.', {
-        icon: '🔄',
-        duration: 5000
-      });
-      // Refresh the list to get updated data
-      dispatch(fetchActiveNumbers({ page: 1, limit: 20 }));
-    } catch (error: any) {
-      console.error('Failed to refresh number:', error);
-      toast.error(error || 'Failed to refresh number');
-    } finally {
-      setRefreshingIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(id);
-        return newSet;
-      });
-    }
-  };
-
   const waitingNumbers = activeNumbers.filter(n => n.status === 'waiting');
   const receivedNumbers = activeNumbers.filter(n => n.status === 'received');
 
@@ -108,7 +86,7 @@ const ActiveNumbers: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto">
-      {/* Header - Made responsive */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
         <div className="min-w-0 flex-1">
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Active Numbers</h1>
@@ -118,7 +96,6 @@ const ActiveNumbers: React.FC = () => {
         </div>
         
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          {/* Auto-refresh toggle - Made responsive */}
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
             className={`px-3 py-2.5 sm:py-2 text-sm font-medium rounded-md transition-colors ${
@@ -130,7 +107,6 @@ const ActiveNumbers: React.FC = () => {
             {autoRefresh ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
           </button>
           
-          {/* Manual refresh - Made responsive */}
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -142,7 +118,7 @@ const ActiveNumbers: React.FC = () => {
         </div>
       </div>
 
-      {/* Stats - Made responsive */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
           <div className="flex items-center">
@@ -187,24 +163,25 @@ const ActiveNumbers: React.FC = () => {
         </div>
       </div>
 
-      {/* Important Notice for Users */}
+      {/* Enhanced User Guidelines */}
       {waitingNumbers.length > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start space-x-3">
             <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <h3 className="text-sm font-medium text-blue-800">💡 Important Reminder</h3>
-              <p className="text-sm text-blue-700 mt-1">
-                If you don't receive an SMS code for any of your active numbers, make sure to <strong>cancel</strong> them 
-                to get a <strong>full refund</strong>. You can cancel after 4 minutes of purchase. 
-                You can also try <strong>refreshing</strong> a number to extend the timer and potentially get a new number.
-              </p>
+              <h3 className="text-sm font-medium text-blue-800">SMS Number Usage Guide</h3>
+              <div className="text-sm text-blue-700 mt-1 space-y-1">
+                <p>• <strong>Multiple SMS:</strong> Active numbers can receive multiple SMS messages during their 20-minute lifespan</p>
+                <p>• <strong>Cancel for Refund:</strong> If no SMS received, cancel after 4 minutes for full refund</p>
+                <p>• <strong>After Expiry:</strong> SMS-Activate offers reactivation service for expired numbers (if available)</p>
+                <p>• <strong>Pro Tip:</strong> Wait a bit before canceling - SMS can arrive any time during the active period</p>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Numbers - Made responsive */}
+      {/* Numbers Display */}
       {activeNumbers.length === 0 ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 sm:p-12">
           <div className="text-center">
@@ -225,7 +202,7 @@ const ActiveNumbers: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4 sm:space-y-6">
-          {/* Waiting Numbers - Made responsive */}
+          {/* Waiting Numbers */}
           {waitingNumbers.length > 0 && (
             <div>
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-3 sm:mb-4">
@@ -243,16 +220,14 @@ const ActiveNumbers: React.FC = () => {
                     number={number}
                     onCancel={() => handleCancel(number.id)}
                     onComplete={() => handleComplete(number.id)}
-                    onRefresh={() => handleRefreshNumber(number.id)}
                     cancelLoading={cancellingIds.has(number.id)}
-                    refreshLoading={refreshingIds.has(number.id)}
                   />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Received Numbers - Made responsive */}
+          {/* Received Numbers */}
           {receivedNumbers.length > 0 && (
             <div>
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-3 sm:mb-4">
@@ -270,9 +245,7 @@ const ActiveNumbers: React.FC = () => {
                     number={number}
                     onCancel={() => handleCancel(number.id)}
                     onComplete={() => handleComplete(number.id)}
-                    onRefresh={() => handleRefreshNumber(number.id)}
                     cancelLoading={cancellingIds.has(number.id)}
-                    refreshLoading={refreshingIds.has(number.id)}
                   />
                 ))}
               </div>
