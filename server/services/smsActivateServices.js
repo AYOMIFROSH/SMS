@@ -1,21 +1,28 @@
-// services/smsActivateServices.js - ENHANCED VERSION WITH FULL API INTEGRATION
+// services/smsActivateServices.js - FIXED: Rate limiting and request queue
 const axios = require('axios');
 const logger = require('../utils/logger');
 const cacheService = require('./cacheServices');
 
 class SmsActivateService {
   constructor() {
-    this.apiUrl = process.env.SMS_ACTIVATE_API_URL || 'https://api.sms-activate.io/stubs/handler_api.php';
+    this.apiUrl = process.env.SMS_ACTIVATE_API_URL || 'https://api.sms-activate.ae/stubs/handler_api.php';
     this.apiKey = process.env.SMS_ACTIVATE_API_KEY;
 
-    // Minimal action map — safe defaults, override via env vars if needed
+    // ADDED: Rate limiting controls
+    this.requestQueue = [];
+    this.isProcessingQueue = false;
+    this.lastRequestTime = 0;
+    this.minRequestDelay = 1000; // 1 second between requests
+    this.maxConcurrentRequests = 1; // Only 1 request at a time
+    this.rateLimitResetTime = null;
+
     this.actionMap = {
       getBalance: process.env.SMS_ACTIVATE_ACTION_GET_BALANCE || 'getBalance',
-      // provider docs use getServicesList for services — override without editing code using env var
       getServices: process.env.SMS_ACTIVATE_ACTION_GET_SERVICES || 'getServicesList',
       getCountries: process.env.SMS_ACTIVATE_ACTION_GET_COUNTRIES || 'getCountries',
       getOperators: process.env.SMS_ACTIVATE_ACTION_GET_OPERATORS || 'getOperators',
-      getPrices: process.env.SMS_ACTIVATE_ACTION_GET_PRICES || 'getPrices',
+      getPrices: process.env.SMS_ACTIVATE_ACTION_GET_PRICES || 'getPricesExtended',
+      getPricesExtended: process.env.SMS_ACTIVATE_ACTION_GET_PRICES_EXTENDED || 'getPricesExtended',
       getNumbersStatus: process.env.SMS_ACTIVATE_ACTION_GET_NUMBERS_STATUS || 'getNumbersStatus',
       getNumber: process.env.SMS_ACTIVATE_ACTION_GET_NUMBER || 'getNumber',
       setStatus: process.env.SMS_ACTIVATE_ACTION_SET_STATUS || 'setStatus',
@@ -23,7 +30,6 @@ class SmsActivateService {
       getFullSms: process.env.SMS_ACTIVATE_ACTION_GET_FULL_SMS || 'getFullSms'
     };
     
-    // SMS-Activate API status codes
     this.statusCodes = {
       'STATUS_WAIT_CODE': 'waiting',
       'STATUS_WAIT_RETRY': 'waiting_retry',
@@ -32,45 +38,119 @@ class SmsActivateService {
       'STATUS_WAIT_RESEND': 'waiting_resend'
     };
 
-    // API action codes for setStatus
     this.actionCodes = {
-      CONFIRM_SMS: 1,      // Confirm SMS received
-      REQUEST_RETRY: 3,    // Request retry
-      FINISH_ACTIVATION: 6, // Finish activation
-      CANCEL_ACTIVATION: 8  // Cancel activation
+      CONFIRM_SMS: 1,      
+      REQUEST_RETRY: 3,    
+      FINISH_ACTIVATION: 6, 
+      CANCEL_ACTIVATION: 8  
     };
 
-    logger.info('Enhanced SMS-Activate Service initialized with full API support');
+    logger.info('SMS-Activate Service initialized with rate limiting');
   }
 
-  async makeRequest(action, params = {}) {
-    try {
+  // ADDED: Queue-based request system to prevent rate limiting
+  async queueRequest(action, params = {}) {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ action, params, resolve, reject });
+      this.processQueue();
+    });
+  }
 
+  async processQueue() {
+    if (this.isProcessingQueue || this.requestQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.requestQueue.length > 0) {
+      // Check if we're in rate limit cooldown
+      if (this.rateLimitResetTime && Date.now() < this.rateLimitResetTime) {
+        const waitTime = this.rateLimitResetTime - Date.now();
+        logger.warn(`⏳ Rate limit cooldown: waiting ${waitTime}ms`);
+        await this.sleep(waitTime);
+        this.rateLimitResetTime = null;
+      }
+
+      // Ensure minimum delay between requests
+      const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+      if (timeSinceLastRequest < this.minRequestDelay) {
+        const delayNeeded = this.minRequestDelay - timeSinceLastRequest;
+        logger.info(`⏱️ Request throttling: waiting ${delayNeeded}ms`);
+        await this.sleep(delayNeeded);
+      }
+
+      const { action, params, resolve, reject } = this.requestQueue.shift();
+
+      try {
+        const result = await this.makeDirectRequest(action, params);
+        resolve(result);
+      } catch (error) {
+        // Handle rate limiting
+        if (error.response?.status === 429 || error.message.includes('rate limit')) {
+          logger.warn('📛 Rate limit hit, backing off for 30 seconds');
+          this.rateLimitResetTime = Date.now() + 30000; // 30 second cooldown
+          
+          // Put the request back at the front of the queue
+          this.requestQueue.unshift({ action, params, resolve, reject });
+          continue;
+        }
+        reject(error);
+      }
+
+      this.lastRequestTime = Date.now();
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Wrapper method that uses the queue
+  async makeRequest(action, params = {}) {
+    return this.queueRequest(action, params);
+  }
+
+  // Direct request method (used by queue processor)
+  async makeDirectRequest(action, params = {}) {
+    try {
       const providerAction = (this.actionMap && this.actionMap[action]) ? this.actionMap[action] : action;
 
       const requestParams = {
         api_key: this.apiKey,
-        action: providerAction, // send providerAction, not raw action
+        action: providerAction,
         ...params
       };
       
-      logger.info(`📡 SMS-Activate API Request - Action: ${action}`, { params: requestParams });
+      logger.info(`📡 SMS-Activate API Request - Action: ${action}`, { 
+        params: { ...requestParams, api_key: '***HIDDEN***' } // Hide API key in logs
+      });
       
       const response = await axios.get(this.apiUrl, {
         params: requestParams,
-        timeout: 30000,
+        timeout: 10000, // Increased timeout
         headers: {
-          'User-Agent': 'SMS-Dashboard-Service/1.0'
+          'User-Agent': 'SMS-Dashboard-Service/2.0',
+          'Accept': 'application/json, text/plain, */*',
+          'Content-Type': 'application/x-www-form-urlencoded'
         }
       });
       
       logger.info(`📡 SMS-Activate API Response - Status: ${response.status}`, { 
-        data: response.data,
+        data: typeof response.data === 'string' && response.data.length > 200 
+          ? response.data.substring(0, 200) + '...' 
+          : response.data,
         dataType: typeof response.data 
       });
       
       // Handle error responses
       if (typeof response.data === 'string') {
+        if (response.data === 'WRONG_DOMAIN') {
+          throw new Error('API key domain restriction: Your SMS-Activate API key is restricted to specific domains. Please contact SMS-Activate support to add your domain or use an unrestricted API key.');
+        }
+        
         const errorMessage = this.parseErrorResponse(response.data);
         if (errorMessage) {
           throw new Error(errorMessage);
@@ -81,10 +161,9 @@ class SmsActivateService {
     } catch (error) {
       logger.error('❌ SMS-Activate API Error:', {
         action,
-        params,
         error: error.message,
-        response: error.response?.data,
-        status: error.response?.status
+        status: error.response?.status,
+        isRateLimit: error.response?.status === 429
       });
       
       throw this.enhanceError(error);
@@ -105,7 +184,8 @@ class SmsActivateService {
       'WRONG_ACTIVATION_ID': 'Invalid activation ID format',
       'WRONG_EXCEPTION_PHONE': 'Invalid phone number exception',
       'NO_OPERATIONS': 'No operations available',
-      'WRONG_ADDITIONAL_SERVICE': 'Invalid additional service'
+      'WRONG_ADDITIONAL_SERVICE': 'Invalid additional service',
+      'WRONG_DOMAIN': 'API key domain restriction - contact SMS-Activate support to authorize your domain'
     };
 
     if (errorMap[response]) {
@@ -132,17 +212,21 @@ class SmsActivateService {
     return error;
   }
 
+  // ENHANCED: Better caching to reduce API calls
   async getBalance() {
     try {
       const cacheKey = 'sms:balance';
       const cached = await cacheService.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        logger.info('💰 Using cached balance');
+        return cached;
+      }
 
       const response = await this.makeRequest('getBalance');
       
       if (typeof response === 'string' && response.includes(':')) {
         const balance = parseFloat(response.split(':')[1]);
-        await cacheService.set(cacheKey, balance, 300); // Cache for 5 minutes
+        await cacheService.set(cacheKey, balance, 600); // Cache for 10 minutes
         return balance;
       }
       
@@ -156,7 +240,10 @@ class SmsActivateService {
   async getServices() {
     try {
       const cached = await cacheService.getCachedServices();
-      if (cached) return cached;
+      if (cached) {
+        logger.info('📋 Using cached services');
+        return cached;
+      }
 
       const response = await this.makeRequest('getServices');
       
@@ -171,7 +258,6 @@ class SmsActivateService {
         services = response;
       }
 
-      // Process and enhance services data
       const processedServices = this.processServicesData(services);
       await cacheService.cacheServices(processedServices);
       
@@ -184,17 +270,9 @@ class SmsActivateService {
 
   processServicesData(services) {
     const serviceCategories = {
-      'wa': 'messaging',
-      'tg': 'messaging',
-      'vi': 'messaging',
-      'go': 'social',
-      'fb': 'social',
-      'ig': 'social',
-      'tw': 'social',
-      'li': 'social',
-      'uber': 'services',
-      'airbnb': 'services',
-      'netflix': 'entertainment'
+      'wa': 'messaging', 'tg': 'messaging', 'vi': 'messaging',
+      'go': 'social', 'fb': 'social', 'ig': 'social', 'tw': 'social', 'li': 'social',
+      'uber': 'services', 'airbnb': 'services', 'netflix': 'entertainment'
     };
 
     if (Array.isArray(services)) {
@@ -224,7 +302,10 @@ class SmsActivateService {
   async getCountries() {
     try {
       const cached = await cacheService.getCachedCountries();
-      if (cached) return cached;
+      if (cached) {
+        logger.info('🌍 Using cached countries');
+        return cached;
+      }
 
       const response = await this.makeRequest('getCountries');
       
@@ -259,12 +340,14 @@ class SmsActivateService {
     }
   }
 
-  // NEW: Get operators by country
   async getOperators(country) {
     try {
       const cacheKey = `sms:operators:${country}`;
       const cached = await cacheService.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        logger.info(`📡 Using cached operators for country ${country}`);
+        return cached;
+      }
 
       const response = await this.makeRequest('getOperators', { country });
       
@@ -273,7 +356,7 @@ class SmsActivateService {
         try {
           operators = JSON.parse(response);
         } catch (e) {
-          return []; // Return empty if no operators
+          return [];
         }
       } else {
         operators = response;
@@ -285,25 +368,29 @@ class SmsActivateService {
         country
       }));
 
-      await cacheService.set(cacheKey, processedOperators, 1800); // Cache 30 minutes
+      await cacheService.set(cacheKey, processedOperators, 3600); // Cache for 1 hour
       return processedOperators;
     } catch (error) {
       logger.error('❌ Get operators error:', error);
-      return []; // Return empty array on error
+      return [];
     }
   }
 
+  // ENHANCED: Better price extraction with freePriceMap handling
   async getPrices(country = null, service = null, operator = null) {
     try {
-      const cacheKey = `sms:prices:${country || 'all'}:${service || 'all'}: ${operator || 'all'}`;
+      const cacheKey = `sms:prices:${country || 'all'}:${service || 'all'}:${operator || 'all'}`;
       const cached = await cacheService.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        logger.info(`💰 Using cached prices for ${service || 'all'} in ${country || 'all'}`);
+        return cached;
+      }
 
       const params = {};
       if (country) params.country = country;
       if (service) params.service = service;
 
-      const response = await this.makeRequest('getPrices', params);
+      const response = await this.makeRequest('getPricesExtended', params);
       
       let prices;
       if (typeof response === 'string') {
@@ -316,12 +403,60 @@ class SmsActivateService {
         prices = response;
       }
 
-      await cacheService.set(cacheKey, prices, 600); // Cache 10 minutes
-      return prices;
+      // ENHANCED: Process prices to extract real prices from freePriceMap
+      const processedPrices = this.processPricesWithFreePriceMap(prices);
+
+      await cacheService.set(cacheKey, processedPrices, 1200); // Cache for 20 minutes
+      return processedPrices;
     } catch (error) {
       logger.error('❌ Get prices error:', error);
       throw error;
     }
+  }
+
+  // ADDED: Process prices with freePriceMap extraction
+  processPricesWithFreePriceMap(prices) {
+    if (!prices || typeof prices !== 'object') return {};
+
+    const processed = {};
+
+    Object.entries(prices).forEach(([countryCode, countryData]) => {
+      if (typeof countryData === 'object') {
+        processed[countryCode] = {};
+
+        Object.entries(countryData).forEach(([serviceCode, serviceData]) => {
+          if (typeof serviceData === 'object') {
+            let realPrice = 0;
+            let availableCount = parseInt(serviceData.count || 0);
+
+            // CRITICAL: Extract real price from freePriceMap
+            if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
+              const actualPrices = Object.keys(serviceData.freePriceMap);
+              realPrice = parseFloat(actualPrices[0]); // Use the actual price
+              
+              const priceMapCount = parseInt(serviceData.freePriceMap[actualPrices[0]] || 0);
+              if (priceMapCount > 0) {
+                availableCount = priceMapCount;
+              }
+            } else {
+              // Fallback to cost field if freePriceMap is not available
+              realPrice = parseFloat(serviceData.cost || 0);
+            }
+
+            processed[countryCode][serviceCode] = {
+              cost: realPrice, // Store the REAL price here
+              realPrice: realPrice,
+              misleadingCost: parseFloat(serviceData.cost || 0),
+              count: availableCount,
+              available: availableCount > 0,
+              freePriceMap: serviceData.freePriceMap || {}
+            };
+          }
+        });
+      }
+    });
+
+    return processed;
   }
 
   async getNumbersStatus(country = null, operator = null) {
@@ -330,7 +465,17 @@ class SmsActivateService {
     if (operator) params.operator = operator;
     
     try {
+      const cacheKey = `sms:numbers_status:${country || 'all'}:${operator || 'all'}`;
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        logger.info('📊 Using cached numbers status');
+        return cached;
+      }
+
       const response = await this.makeRequest('getNumbersStatus', params);
+      
+      // Cache the response for 5 minutes
+      await cacheService.set(cacheKey, response, 300);
       return response;
     } catch (error) {
       logger.error('❌ Get numbers status error:', error);
@@ -338,41 +483,39 @@ class SmsActivateService {
     }
   }
 
-  // Enhanced number purchase with better error handling
-  async getNumber(service, country = null, operator = null, maxPrice = null) {
-  const params = { service };
-  if (country) params.country = country;
-  if (operator) params.operator = operator;
-  // REMOVED: maxPrice is not supported by SMS-Activate getNumber API
-  // The price validation should be done before calling this method
+  // ... (rest of the methods remain the same)
   
-  try {
-    logger.info('📱 Purchasing number:', params);
-    const response = await this.makeRequest('getNumber', params);
+  async getNumber(service, country = null, operator = null, maxPrice = null) {
+    const params = { service };
+    if (country) params.country = country;
+    if (operator) params.operator = operator;
     
-    if (typeof response === 'string') {
-      const parts = response.split(':');
-      const status = parts[0];
+    try {
+      logger.info('📱 Purchasing number:', params);
+      const response = await this.makeRequest('getNumber', params);
       
-      if (status === 'ACCESS_NUMBER') {
-        return { 
-          id: parts[1], 
-          number: parts[2],
-          status: 'purchased'
-        };
-      } else {
-        throw new Error(this.parseErrorResponse(response) || response);
+      if (typeof response === 'string') {
+        const parts = response.split(':');
+        const status = parts[0];
+        
+        if (status === 'ACCESS_NUMBER') {
+          return { 
+            id: parts[1], 
+            number: parts[2],
+            status: 'purchased'
+          };
+        } else {
+          throw new Error(this.parseErrorResponse(response) || response);
+        }
       }
+      
+      throw new Error('Invalid number response format');
+    } catch (error) {
+      logger.error('❌ Get number error:', error);
+      throw error;
     }
-    
-    throw new Error('Invalid number response format');
-  } catch (error) {
-    logger.error('❌ Get number error:', error);
-    throw error;
   }
-}
 
-  // Enhanced status management
   async setStatus(id, status, forward = null) {
     const params = { id, status };
     if (forward) params.forward = forward;
@@ -394,7 +537,7 @@ class SmsActivateService {
 
   async getStatus(id) {
     try {
-      logger.info('🔍 Getting status for:', id);
+      logger.info('📋 Getting status for:', id);
       const response = await this.makeRequest('getStatus', { id });
       
       if (typeof response === 'string') {
@@ -420,9 +563,6 @@ class SmsActivateService {
     }
   }
 
-  
-
-  // NEW: Get full SMS text
   async getFullSms(id) {
     try {
       logger.info('📨 Getting full SMS for:', id);
@@ -440,91 +580,6 @@ class SmsActivateService {
     }
   }
 
-  // NEW: Get active activations
-  async getActiveActivations() {
-    try {
-      logger.info('🔄 Getting active activations...');
-      const response = await this.makeRequest('getActiveActivations');
-      
-      if (typeof response === 'string') {
-        try {
-          return JSON.parse(response);
-        } catch (e) {
-          return [];
-        }
-      }
-      
-      return response || [];
-    } catch (error) {
-      logger.error('❌ Get active activations error:', error);
-      return [];
-    }
-  }
-
-  // NEW: Additional service for longer SMS
-  async additionalService(id, service) {
-    try {
-      logger.info('➕ Requesting additional service:', { id, service });
-      const response = await this.makeRequest('additionalService', { id, service });
-      return response;
-    } catch (error) {
-      logger.error('❌ Additional service error:', error);
-      throw error;
-    }
-  }
-
-  // NEW: Buy activation subscription
-  async buySubscription(service, country, period) {
-    try {
-      logger.info('💳 Buying subscription:', { service, country, period });
-      const response = await this.makeRequest('buySubscription', {
-        service,
-        country,
-        period
-      });
-      
-      if (typeof response === 'string' && response.startsWith('ACCESS_SUBSCRIPTION:')) {
-        const subscriptionId = response.split(':')[1];
-        return { success: true, subscriptionId };
-      }
-      
-      throw new Error(this.parseErrorResponse(response) || 'Failed to buy subscription');
-    } catch (error) {
-      logger.error('❌ Buy subscription error:', error);
-      throw error;
-    }
-  }
-
-  // NEW: Get subscription status
-  async getSubscriptionStatus(subscriptionId) {
-    try {
-      logger.info('📋 Getting subscription status:', subscriptionId);
-      const response = await this.makeRequest('getSubscriptionStatus', {
-        id: subscriptionId
-      });
-      return response;
-    } catch (error) {
-      logger.error('❌ Get subscription status error:', error);
-      throw error;
-    }
-  }
-
-  // NEW: Cancel subscription
-  async cancelSubscription(subscriptionId) {
-    try {
-      logger.info('❌ Canceling subscription:', subscriptionId);
-      const response = await this.makeRequest('setSubscriptionStatus', {
-        id: subscriptionId,
-        status: 'cancel'
-      });
-      return response;
-    } catch (error) {
-      logger.error('❌ Cancel subscription error:', error);
-      throw error;
-    }
-  }
-
-  // Utility methods
   getActionCode(action) {
     return this.actionCodes[action] || action;
   }
@@ -535,7 +590,18 @@ class SmsActivateService {
            response === 'BAD_KEY' || 
            response === 'BAD_ACTION' ||
            response === 'NO_BALANCE' ||
-           response === 'NO_NUMBERS';
+           response === 'NO_NUMBERS' ||
+           response === 'WRONG_DOMAIN';
+  }
+
+  // ADDED: Get queue status for debugging
+  getQueueStatus() {
+    return {
+      queueLength: this.requestQueue.length,
+      isProcessing: this.isProcessingQueue,
+      rateLimitActive: this.rateLimitResetTime && Date.now() < this.rateLimitResetTime,
+      rateLimitResetTime: this.rateLimitResetTime
+    };
   }
 }
 

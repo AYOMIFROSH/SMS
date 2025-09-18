@@ -257,7 +257,6 @@ router.get('/operators/:country',
   }
 );
 
-// Enhanced prices with caching and validation
 router.get('/prices',
   authenticateToken,
   [
@@ -275,17 +274,41 @@ router.get('/prices',
     const { country, service } = req.query;
 
     try {
-      logger.info('🔍 Getting prices for:', { country, service });
+      logger.info('💰 Getting prices for:', { country, service });
 
-      // Check cache first
+      // Check cache first with longer TTL during rate limiting
       let prices = await cacheService.getCachedPrices(country, service);
 
       if (!prices) {
-        prices = await smsActivateService.getPrices(country, service);
-        await cacheService.cachePrices(country, service, prices);
+        try {
+          prices = await smsActivateService.getPrices(country, service);
+          await cacheService.cachePrices(country, service, prices);
+        } catch (apiError) {
+          // If we hit rate limiting, return cached data if available (even expired)
+          if (apiError.message.includes('rate limit') || apiError.message.includes('429')) {
+            logger.warn('⚠️ Rate limit hit, attempting to use any cached data');
+            
+            // Try to get cached data with no expiry check
+            const anyCachedPrices = await cacheService.get(`sms:prices:${country || 'all'}:${service || 'all'}:all`);
+            if (anyCachedPrices) {
+              logger.info('💾 Using stale cached prices due to rate limiting');
+              prices = anyCachedPrices;
+            } else {
+              // Return a friendly rate limit error
+              return res.status(429).json({
+                error: 'Rate limit exceeded. Please try again in a moment.',
+                code: 'RATE_LIMIT_EXCEEDED',
+                retryAfter: 30,
+                message: 'SMS-Activate API is temporarily unavailable due to rate limiting. Cached data will be used when available.'
+              });
+            }
+          } else {
+            throw apiError;
+          }
+        }
       }
 
-      // Process prices to ensure consistent format
+      // Process prices to ensure consistent format with real prices
       const processedPrices = processPricesData(prices);
 
       logger.info('✅ Prices retrieved successfully');
@@ -293,6 +316,7 @@ router.get('/prices',
       res.json({
         success: true,
         data: processedPrices,
+        cached: !!await cacheService.getCachedPrices(country, service),
         filters: {
           country: country || null,
           service: service || null
@@ -300,13 +324,26 @@ router.get('/prices',
       });
     } catch (error) {
       logger.error('❌ Prices route error:', error);
-      res.status(500).json({
-        error: 'Failed to get prices',
-        message: error.message
-      });
+      
+      // Enhanced error response
+      if (error.message.includes('rate limit') || error.message.includes('429')) {
+        res.status(429).json({
+          error: 'Rate limit exceeded',
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many requests. Please wait before trying again.',
+          retryAfter: 30
+        });
+      } else {
+        res.status(500).json({
+          error: 'Failed to get prices',
+          message: error.message,
+          code: 'PRICE_FETCH_ERROR'
+        });
+      }
     }
   }
 );
+
 
 // Enhanced availability check
 router.get('/availability',
@@ -516,7 +553,6 @@ router.get('/search',
 function processPricesData(prices) {
   if (!prices || typeof prices !== 'object') return {};
 
-  // Convert to consistent format
   const processed = {};
 
   Object.entries(prices).forEach(([countryCode, countryData]) => {
@@ -525,16 +561,55 @@ function processPricesData(prices) {
 
       Object.entries(countryData).forEach(([serviceCode, serviceData]) => {
         if (typeof serviceData === 'object') {
+          let realPrice = 0;
+          let availableCount = parseInt(serviceData.count || 0);
+
+          // CRITICAL: Extract real price from freePriceMap instead of misleading cost
+          if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
+            // The freePriceMap keys are the actual prices
+            const actualPrices = Object.keys(serviceData.freePriceMap);
+            realPrice = parseFloat(actualPrices[0]); // Use the first (usually only) price
+            
+            // Get count from freePriceMap value if available
+            const priceMapCount = parseInt(serviceData.freePriceMap[actualPrices[0]] || 0);
+            if (priceMapCount > 0) {
+              availableCount = priceMapCount;
+            }
+
+            logger.info('💰 Extracted real price from freePriceMap:', {
+              serviceCode,
+              countryCode,
+              misleadingCost: serviceData.cost,
+              realPrice: realPrice,
+              availableCount: availableCount
+            });
+          } else {
+            // Fallback to cost field only if freePriceMap is not available
+            realPrice = parseFloat(serviceData.cost || 0);
+            logger.warn('⚠️ No freePriceMap found, using cost field (might be inaccurate):', {
+              serviceCode,
+              countryCode,
+              cost: realPrice
+            });
+          }
+
           processed[countryCode][serviceCode] = {
-            cost: parseFloat(serviceData.cost || 0),
-            count: parseInt(serviceData.count || 0),
-            available: (serviceData.count || 0) > 0
+            // Store the REAL price, not the misleading cost
+            cost: realPrice,
+            realPrice: realPrice, // Make it explicit
+            misleadingCost: parseFloat(serviceData.cost || 0), // Keep for debugging
+            count: availableCount,
+            available: availableCount > 0,
+            // Include original freePriceMap for reference
+            freePriceMap: serviceData.freePriceMap || {}
           };
         } else {
           processed[countryCode][serviceCode] = {
             cost: parseFloat(serviceData || 0),
+            realPrice: parseFloat(serviceData || 0),
             count: 0,
-            available: false
+            available: false,
+            freePriceMap: {}
           };
         }
       });
@@ -543,6 +618,7 @@ function processPricesData(prices) {
 
   return processed;
 }
+
 
 function processAvailabilityData(availability) {
   if (!availability || typeof availability !== 'object') return {};
