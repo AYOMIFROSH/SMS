@@ -130,9 +130,9 @@ class SmsActivateService {
       
       const response = await axios.get(this.apiUrl, {
         params: requestParams,
-        timeout: 10000, // Increased timeout
+        timeout: 45000, // Increased timeout
         headers: {
-          'User-Agent': 'SMS-Dashboard-Service/2.0',
+          'User-Agent': 'SMS-Dashboard-Service/1.0',
           'Accept': 'application/json, text/plain, */*',
           'Content-Type': 'application/x-www-form-urlencoded'
         }
@@ -341,41 +341,40 @@ class SmsActivateService {
   }
 
   async getOperators(country) {
-    try {
-      const cacheKey = `sms:operators:${country}`;
-      const cached = await cacheService.get(cacheKey);
-      if (cached) {
-        logger.info(`📡 Using cached operators for country ${country}`);
-        return cached;
-      }
-
-      const response = await this.makeRequest('getOperators', { country });
-      
-      let operators;
-      if (typeof response === 'string') {
-        try {
-          operators = JSON.parse(response);
-        } catch (e) {
-          return [];
-        }
-      } else {
-        operators = response;
-      }
-
-      const processedOperators = Object.entries(operators).map(([id, name]) => ({
-        id,
-        name,
-        country
-      }));
-
-      await cacheService.set(cacheKey, processedOperators, 3600); // Cache for 1 hour
-      return processedOperators;
-    } catch (error) {
-      logger.error('❌ Get operators error:', error);
-      return [];
+  try {
+    const cacheKey = `sms:operators:${country}`;
+    const cached = await cacheService.get(cacheKey);
+    if (cached) {
+      logger.info(`📡 Using cached operators for country ${country}`);
+      return cached;
     }
-  }
 
+    const response = await this.makeRequest('getOperators', { country });
+    
+    // Handle SMS-Activate response format
+    let processedResponse;
+    if (typeof response === 'object' && response.status === 'success') {
+      // Return the full response for route to handle
+      processedResponse = response;
+    } else if (typeof response === 'string') {
+      try {
+        processedResponse = JSON.parse(response);
+      } catch (e) {
+        logger.warn(`Failed to parse operators response for country ${country}:`, response);
+        processedResponse = { status: 'success', countryOperators: {} };
+      }
+    } else {
+      processedResponse = response;
+    }
+
+    await cacheService.set(cacheKey, processedResponse, 3600); // Cache for 1 hour
+    return processedResponse;
+  } catch (error) {
+    logger.error('❌ Get operators error:', error);
+    // Return empty response instead of throwing
+    return { status: 'success', countryOperators: {} };
+  }
+}
   // ENHANCED: Better price extraction with freePriceMap handling
   async getPrices(country = null, service = null, operator = null) {
     try {
@@ -429,12 +428,17 @@ class SmsActivateService {
             let realPrice = 0;
             let availableCount = parseInt(serviceData.count || 0);
 
-            // CRITICAL: Extract real price from freePriceMap
+            // CRITICAL: Extract real price from freePriceMap - use LOWEST price as default
             if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
-              const actualPrices = Object.keys(serviceData.freePriceMap);
-              realPrice = parseFloat(actualPrices[0]); // Use the actual price
+              const actualPrices = Object.keys(serviceData.freePriceMap).map(p => parseFloat(p));
               
-              const priceMapCount = parseInt(serviceData.freePriceMap[actualPrices[0]] || 0);
+              // Sort prices ascending and get the lowest (cheapest) price as default
+              actualPrices.sort((a, b) => a - b);
+              realPrice = actualPrices[0]; // Use the cheapest price as default
+              
+              // Get count for the cheapest price
+              const cheapestPriceStr = realPrice.toFixed(4);
+              const priceMapCount = parseInt(serviceData.freePriceMap[cheapestPriceStr] || 0);
               if (priceMapCount > 0) {
                 availableCount = priceMapCount;
               }

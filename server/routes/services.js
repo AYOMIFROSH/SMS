@@ -168,10 +168,10 @@ router.get('/operators/:country/:service',
 
       // Get all operators for country
       const allOperators = await smsActivateService.getOperators(country);
-      
+
       // Get availability for the specific service
       const availability = await smsActivateService.getNumbersStatus(country);
-      
+
       // Filter operators that have availability for this service
       const availableOperators = allOperators.filter(operator => {
         const key = `${service}_${operator.id}`;
@@ -222,41 +222,56 @@ router.get('/operators/:country',
     try {
       logger.info('📡 Getting operators for country:', country);
 
-      const operators = await smsActivateService.getOperators(country);
-      
-      // Add availability status hint (general availability, not service-specific)
-      const availability = await smsActivateService.getNumbersStatus(country);
-      
-      const operatorsWithStatus = operators.map(operator => ({
-        ...operator,
-        hasGeneralAvailability: Object.keys(availability).some(key => 
-          key.includes(`_${operator.id}`) && parseInt(availability[key]) > 0
-        )
-      }));
+      const response = await smsActivateService.getOperators(country);
 
-      logger.info('✅ Operators retrieved successfully:', {
+      let operators = [];
+
+      // Handle SMS-Activate API response format
+      if (response && response.status === 'success' && response.countryOperators) {
+        // SMS-Activate returns: {"status":"success", "countryOperators": {"36": ["operator1", "operator2"]}}
+        const countryOperators = response.countryOperators[country];
+        if (Array.isArray(countryOperators)) {
+          operators = countryOperators.map((operatorName, index) => ({
+            id: operatorName.toLowerCase(), // Use operator name as ID
+            name: operatorName.charAt(0).toUpperCase() + operatorName.slice(1), // Capitalize
+            country: country
+          }));
+        }
+      } else if (Array.isArray(response)) {
+        // Direct array response (from your cached data)
+        operators = response;
+      }
+
+      logger.info('✅ Operators processed successfully:', {
         country,
-        count: operatorsWithStatus.length
+        count: operators.length,
+        operators: operators.map(op => op.name)
       });
 
       res.json({
         success: true,
-        data: operatorsWithStatus,
+        data: operators,
         country: country,
-        total: operatorsWithStatus.length
+        total: operators.length
       });
 
     } catch (error) {
       logger.error('❌ Operators route error:', error);
-      res.status(500).json({
-        error: 'Failed to get operators',
-        message: error.message,
-        country: country
+
+      // Return empty array instead of error to prevent frontend issues
+      res.json({
+        success: true,
+        data: [],
+        country: country,
+        total: 0,
+        message: 'No operators found for this country'
       });
     }
   }
 );
 
+
+// Enhanced prices with caching and validation
 router.get('/prices',
   authenticateToken,
   [
@@ -287,7 +302,7 @@ router.get('/prices',
           // If we hit rate limiting, return cached data if available (even expired)
           if (apiError.message.includes('rate limit') || apiError.message.includes('429')) {
             logger.warn('⚠️ Rate limit hit, attempting to use any cached data');
-            
+
             // Try to get cached data with no expiry check
             const anyCachedPrices = await cacheService.get(`sms:prices:${country || 'all'}:${service || 'all'}:all`);
             if (anyCachedPrices) {
@@ -324,7 +339,7 @@ router.get('/prices',
       });
     } catch (error) {
       logger.error('❌ Prices route error:', error);
-      
+
       // Enhanced error response
       if (error.message.includes('rate limit') || error.message.includes('429')) {
         res.status(429).json({
@@ -550,6 +565,7 @@ router.get('/search',
 );
 
 // Helper methods
+
 function processPricesData(prices) {
   if (!prices || typeof prices !== 'object') return {};
 
@@ -564,43 +580,48 @@ function processPricesData(prices) {
           let realPrice = 0;
           let availableCount = parseInt(serviceData.count || 0);
 
-          // CRITICAL: Extract real price from freePriceMap instead of misleading cost
+          // CRITICAL FIX: Extract CHEAPEST price from freePriceMap
           if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
-            // The freePriceMap keys are the actual prices
-            const actualPrices = Object.keys(serviceData.freePriceMap);
-            realPrice = parseFloat(actualPrices[0]); // Use the first (usually only) price
-            
-            // Get count from freePriceMap value if available
-            const priceMapCount = parseInt(serviceData.freePriceMap[actualPrices[0]] || 0);
-            if (priceMapCount > 0) {
-              availableCount = priceMapCount;
+            // Convert all price keys to numbers and sort to find cheapest
+            const allPrices = Object.keys(serviceData.freePriceMap)
+              .map(priceKey => parseFloat(priceKey))
+              .filter(price => !isNaN(price))
+              .sort((a, b) => a - b); // Sort ascending - cheapest first
+
+            if (allPrices.length > 0) {
+              realPrice = allPrices[0]; // Get the cheapest price
+
+              // Find the original key for this price to get the count
+              const cheapestPriceKey = Object.keys(serviceData.freePriceMap)
+                .find(key => Math.abs(parseFloat(key) - realPrice) < 0.0001);
+
+              if (cheapestPriceKey) {
+                const countForCheapest = parseInt(serviceData.freePriceMap[cheapestPriceKey] || 0);
+                if (countForCheapest > 0) {
+                  availableCount = countForCheapest;
+                }
+              }
             }
 
-            logger.info('💰 Extracted real price from freePriceMap:', {
-              serviceCode,
-              countryCode,
-              misleadingCost: serviceData.cost,
-              realPrice: realPrice,
-              availableCount: availableCount
+            console.log(`PRICE DEBUG - ${serviceCode} in country ${countryCode}:`, {
+              originalCost: serviceData.cost,
+              allAvailablePrices: allPrices,
+              selectedCheapestPrice: realPrice,
+              countAtCheapestPrice: availableCount,
+              userWillPay: realPrice * 2 // With 100% bonus
             });
           } else {
-            // Fallback to cost field only if freePriceMap is not available
+            // Fallback to cost field if freePriceMap is not available
             realPrice = parseFloat(serviceData.cost || 0);
-            logger.warn('⚠️ No freePriceMap found, using cost field (might be inaccurate):', {
-              serviceCode,
-              countryCode,
-              cost: realPrice
-            });
+            console.log(`PRICE DEBUG - ${serviceCode} in country ${countryCode}: No freePriceMap, using cost: ${realPrice}`);
           }
 
           processed[countryCode][serviceCode] = {
-            // Store the REAL price, not the misleading cost
-            cost: realPrice,
-            realPrice: realPrice, // Make it explicit
-            misleadingCost: parseFloat(serviceData.cost || 0), // Keep for debugging
+            cost: realPrice, // Store the REAL cheapest price
+            realPrice: realPrice,
+            misleadingCost: parseFloat(serviceData.cost || 0),
             count: availableCount,
             available: availableCount > 0,
-            // Include original freePriceMap for reference
             freePriceMap: serviceData.freePriceMap || {}
           };
         } else {

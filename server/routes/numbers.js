@@ -61,10 +61,17 @@ router.post('/purchase',
         const serviceData = prices[country][service];
 
         // Check if freePriceMap exists (this contains actual prices)
-        if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
-          // Get the actual price from freePriceMap (usually the first/only key)
-          const actualPrices = Object.keys(serviceData.freePriceMap);
-          realPrice = parseFloat(actualPrices[0]); // Use the actual price, not the misleading "cost"
+        if (serviceData.realPrice !== undefined) {
+          realPrice = parseFloat(serviceData.realPrice);
+          console.log('Using processed realPrice:', realPrice);
+        } else if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
+          // Direct extraction if not processed yet
+          const allPrices = Object.keys(serviceData.freePriceMap)
+            .map(priceKey => parseFloat(priceKey))
+            .filter(price => !isNaN(price))
+            .sort((a, b) => a - b);
+
+          realPrice = allPrices[0]; // Use the actual price, not the misleading "cost"
 
           logger.info('💰 Using ACTUAL price from freePriceMap:', {
             misleadingCost: serviceData.cost,
@@ -74,7 +81,7 @@ router.post('/purchase',
           });
         } else {
           // Fallback to cost field if freePriceMap is not available
-          realPrice = serviceData.cost || 0;
+          realPrice = parseFloat(serviceData.cost || 0);
           logger.warn('⚠️ No freePriceMap found, using cost field (might be inaccurate):', {
             cost: realPrice,
             service,
