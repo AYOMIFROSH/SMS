@@ -234,11 +234,13 @@ router.get('/prices',
 
       // Check cache first with longer TTL during rate limiting
       let prices = await cacheService.getCachedPrices(country, service);
+      let fromCache = !!prices;
 
       if (!prices) {
         try {
           prices = await smsActivateService.getPrices(country, service);
           await cacheService.cachePrices(country, service, prices);
+          fromCache = false;
         } catch (apiError) {
           // If we hit rate limiting, return cached data if available (even expired)
           if (apiError.message.includes('rate limit') || apiError.message.includes('429')) {
@@ -249,6 +251,7 @@ router.get('/prices',
             if (anyCachedPrices) {
               logger.info('💾 Using stale cached prices due to rate limiting');
               prices = anyCachedPrices;
+              fromCache = true;
             } else {
               // Return a friendly rate limit error
               return res.status(429).json({
@@ -272,7 +275,7 @@ router.get('/prices',
       res.json({
         success: true,
         data: processedPrices,
-        cached: !!await cacheService.getCachedPrices(country, service),
+        cached: fromCache,
         filters: {
           country: country || null,
           service: service || null
@@ -301,9 +304,7 @@ router.get('/prices',
 );
 
 
-
 // Helper methods
-
 function processPricesData(prices) {
   if (!prices || typeof prices !== 'object') return {};
 

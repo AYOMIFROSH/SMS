@@ -9,12 +9,17 @@ class SmsActivateService {
     this.apiKey = process.env.SMS_ACTIVATE_API_KEY;
 
     // ADDED: Rate limiting controls
-    this.requestQueue = [];
-    this.isProcessingQueue = false;
-    this.lastRequestTime = 0;
-    this.minRequestDelay = 1000; // 1 second between requests
-    this.maxConcurrentRequests = 1; // Only 1 request at a time
-    this.rateLimitResetTime = null;
+    this.readQueue = [];    // for non-mutating ops like getBalance/getPrices/getServices
+    this.writeQueue = [];   // for mutating ops like getNumber/setStatus
+    this.readConcurrency = 5;      // allow some parallelism for reads
+    this.writeConcurrency = 1;     // serialize writes
+    this.currentRead = 0;
+    this.currentWrite = 0;
+    this.minRequestDelayRead = 200;   // 0.2s → 5 requests/sec
+    this.minRequestDelayWrite = 1000; // 1s → smoother cancels/activations
+    this.backoff = { multiplier: 1, maxMultiplier: 6 }; // exponential backoff control
+    this.consecutive429s = 0;
+    this.globalRateLimitReset = null;
 
     this.actionMap = {
       getBalance: process.env.SMS_ACTIVATE_ACTION_GET_BALANCE || 'getBalance',
@@ -29,7 +34,7 @@ class SmsActivateService {
       getStatus: process.env.SMS_ACTIVATE_ACTION_GET_STATUS || 'getStatus',
       getFullSms: process.env.SMS_ACTIVATE_ACTION_GET_FULL_SMS || 'getFullSms'
     };
-    
+
     this.statusCodes = {
       'STATUS_WAIT_CODE': 'waiting',
       'STATUS_WAIT_RETRY': 'waiting_retry',
@@ -39,78 +44,143 @@ class SmsActivateService {
     };
 
     this.actionCodes = {
-      CONFIRM_SMS: 1,      
-      REQUEST_RETRY: 3,    
-      FINISH_ACTIVATION: 6, 
-      CANCEL_ACTIVATION: 8  
+      CONFIRM_SMS: 1,
+      REQUEST_RETRY: 3,
+      FINISH_ACTIVATION: 6,
+      CANCEL_ACTIVATION: 8
     };
 
     logger.info('SMS-Activate Service initialized with rate limiting');
   }
 
-  // ADDED: Queue-based request system to prevent rate limiting
-  async queueRequest(action, params = {}) {
+  async queueRequest(action, params = {}, options = { type: 'read' }) {
     return new Promise((resolve, reject) => {
-      this.requestQueue.push({ action, params, resolve, reject });
-      this.processQueue();
+      const entry = { action, params, options, resolve, reject, createdAt: Date.now() };
+      if (options.type === 'write') {
+        this.writeQueue.push(entry);
+        this.processWriteQueue();
+      } else {
+        this.readQueue.push(entry);
+        this.processReadQueue();
+      }
     });
   }
 
-  async processQueue() {
-    if (this.isProcessingQueue || this.requestQueue.length === 0) {
-      return;
-    }
+  // Helper to compute delay depending on type and backoff
+  _computeDelay(type) {
+    const base = type === 'write' ? this.minRequestDelayWrite : this.minRequestDelayRead;
+    // scale by backoff multiplier (exponential on consecutive 429s), with jitter
+    const mult = Math.min(this.backoff.multiplier, this.backoff.maxMultiplier);
+    const jitter = Math.floor(Math.random() * 250);
+    return base * mult + jitter;
+  }
 
-    this.isProcessingQueue = true;
+  // Process reads (concurrent)
+  async processReadQueue() {
+    if (this.globalRateLimitReset && Date.now() < this.globalRateLimitReset) return;
+    while (this.readQueue.length > 0 && this.currentRead < this.readConcurrency) {
+      const entry = this.readQueue.shift();
+      this.currentRead++;
+      (async () => {
+        try {
+          // throttle per-request if needed
+          const since = Date.now() - this.lastRequestTime;
+          const delayNeeded = this.minRequestDelayRead - since;
+          if (delayNeeded > 0) await this.sleep(delayNeeded);
 
-    while (this.requestQueue.length > 0) {
-      // Check if we're in rate limit cooldown
-      if (this.rateLimitResetTime && Date.now() < this.rateLimitResetTime) {
-        const waitTime = this.rateLimitResetTime - Date.now();
-        logger.warn(`⏳ Rate limit cooldown: waiting ${waitTime}ms`);
-        await this.sleep(waitTime);
-        this.rateLimitResetTime = null;
-      }
+          const res = await this.makeDirectRequest(entry.action, entry.params);
+          // success: reset 429 counters/backoff
+          this.consecutive429s = Math.max(0, this.consecutive429s - 1);
+          this.backoff.multiplier = Math.max(1, this.backoff.multiplier - 0.5);
 
-      // Ensure minimum delay between requests
-      const timeSinceLastRequest = Date.now() - this.lastRequestTime;
-      if (timeSinceLastRequest < this.minRequestDelay) {
-        const delayNeeded = this.minRequestDelay - timeSinceLastRequest;
-        logger.info(`⏱️ Request throttling: waiting ${delayNeeded}ms`);
-        await this.sleep(delayNeeded);
-      }
-
-      const { action, params, resolve, reject } = this.requestQueue.shift();
-
-      try {
-        const result = await this.makeDirectRequest(action, params);
-        resolve(result);
-      } catch (error) {
-        // Handle rate limiting
-        if (error.response?.status === 429 || error.message.includes('rate limit')) {
-          logger.warn('📛 Rate limit hit, backing off for 30 seconds');
-          this.rateLimitResetTime = Date.now() + 30000; // 30 second cooldown
-          
-          // Put the request back at the front of the queue
-          this.requestQueue.unshift({ action, params, resolve, reject });
-          continue;
+          entry.resolve(res);
+        } catch (err) {
+          // handle 429 specially
+          if (err.response?.status === 429) {
+            this.consecutive429s++;
+            // honor Retry-After header if present
+            const ra = err.response?.headers?.['retry-after'];
+            let cooldownMs = 30000;
+            if (ra) {
+              const raSec = parseInt(ra, 10);
+              if (!Number.isNaN(raSec)) cooldownMs = raSec * 1000;
+            } else {
+              this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 2);
+              cooldownMs = Math.min(60000, this._computeDelay('read') * 10);
+            }
+            this.globalRateLimitReset = Date.now() + cooldownMs;
+            // put this request back into the front of the read queue to retry later
+            this.readQueue.unshift(entry);
+          } else {
+            entry.reject(err);
+          }
+        } finally {
+          this.currentRead = Math.max(0, this.currentRead - 1);
+          this.lastRequestTime = Date.now();
         }
-        reject(error);
-      }
+      })();
+    }
+  }
 
+  // Process writes (single concurrency)
+  async processWriteQueue() {
+    if (this.globalRateLimitReset && Date.now() < this.globalRateLimitReset) return;
+    if (this.currentWrite > 0) return;
+    if (this.writeQueue.length === 0) return;
+
+    const entry = this.writeQueue.shift();
+    this.currentWrite = 1;
+
+    try {
+      const since = Date.now() - this.lastRequestTime;
+      const delayNeeded = this.minRequestDelayWrite - since;
+      if (delayNeeded > 0) await this.sleep(delayNeeded);
+
+      const res = await this.makeDirectRequest(entry.action, entry.params);
+      // success: reset 429 counters/backoff
+      this.consecutive429s = Math.max(0, this.consecutive429s - 1);
+      this.backoff.multiplier = 1;
+
+      entry.resolve(res);
+    } catch (err) {
+      if (err.response?.status === 429) {
+        this.consecutive429s++;
+        // Retry-After header preferred
+        const ra = err.response?.headers?.['retry-after'];
+        let cooldownMs = 2000; // quick retry 2s later
+        if (ra) {
+          const raSec = parseInt(ra, 10);
+          if (!Number.isNaN(raSec)) cooldownMs = raSec * 1000;
+        } else {
+          // exponential backoff w/jitter
+          this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 2);
+          cooldownMs = Math.min(120000, this.minRequestDelayWrite * this.backoff.multiplier + Math.floor(Math.random() * 5000));
+        }
+        this.globalRateLimitReset = Date.now() + cooldownMs;
+        // requeue to front
+        this.writeQueue.unshift(entry);
+      } else {
+        entry.reject(err);
+      }
+    } finally {
+      this.currentWrite = 0;
       this.lastRequestTime = Date.now();
+      // kick both queues after finishing a write because write may affect available resources
+      setImmediate(() => {
+        this.processReadQueue();
+        this.processWriteQueue();
+      });
     }
 
-    this.isProcessingQueue = false;
   }
 
-  async sleep(ms) {
+  // Convenience wrapper: still keep makeRequest signature; optional options param allowed.
+  async makeRequest(action, params = {}, options = { type: 'read' }) {
+    return this.queueRequest(action, params, options);
+  }
+
+  sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  // Wrapper method that uses the queue
-  async makeRequest(action, params = {}) {
-    return this.queueRequest(action, params);
   }
 
   // Direct request method (used by queue processor)
@@ -123,40 +193,40 @@ class SmsActivateService {
         action: providerAction,
         ...params
       };
-      
-      logger.info(`📡 SMS-Activate API Request - Action: ${action}`, { 
+
+      logger.info(`📡 SMS-Activate API Request - Action: ${action}`, {
         params: { ...requestParams, api_key: '***HIDDEN***' } // Hide API key in logs
       });
-      
+
       const response = await axios.get(this.apiUrl, {
         params: requestParams,
-        timeout: 2000, // Increased timeout
+        timeout: 45000, // Increased timeout
         headers: {
           'User-Agent': 'SMS-Dashboard-Service/1.0',
           'Accept': 'application/json, text/plain, */*',
           'Content-Type': 'application/x-www-form-urlencoded'
         }
       });
-      
-      logger.info(`📡 SMS-Activate API Response - Status: ${response.status}`, { 
-        data: typeof response.data === 'string' && response.data.length > 200 
-          ? response.data.substring(0, 200) + '...' 
+
+      logger.info(`📡 SMS-Activate API Response - Status: ${response.status}`, {
+        data: typeof response.data === 'string' && response.data.length > 200
+          ? response.data.substring(0, 200) + '...'
           : response.data,
-        dataType: typeof response.data 
+        dataType: typeof response.data
       });
-      
+
       // Handle error responses
       if (typeof response.data === 'string') {
         if (response.data === 'WRONG_DOMAIN') {
           throw new Error('API key domain restriction: Your SMS-Activate API key is restricted to specific domains. Please contact SMS-Activate support to add your domain or use an unrestricted API key.');
         }
-        
+
         const errorMessage = this.parseErrorResponse(response.data);
         if (errorMessage) {
           throw new Error(errorMessage);
         }
       }
-      
+
       return response.data;
     } catch (error) {
       logger.error('❌ SMS-Activate API Error:', {
@@ -165,7 +235,7 @@ class SmsActivateService {
         status: error.response?.status,
         isRateLimit: error.response?.status === 429
       });
-      
+
       throw this.enhanceError(error);
     }
   }
@@ -223,13 +293,13 @@ class SmsActivateService {
       }
 
       const response = await this.makeRequest('getBalance');
-      
+
       if (typeof response === 'string' && response.includes(':')) {
         const balance = parseFloat(response.split(':')[1]);
         await cacheService.set(cacheKey, balance, 600); // Cache for 10 minutes
         return balance;
       }
-      
+
       throw new Error('Invalid balance response format');
     } catch (error) {
       logger.error('❌ Get balance error:', error);
@@ -246,7 +316,7 @@ class SmsActivateService {
       }
 
       const response = await this.makeRequest('getServices');
-      
+
       let services;
       if (typeof response === 'string') {
         try {
@@ -260,7 +330,7 @@ class SmsActivateService {
 
       const processedServices = this.processServicesData(services);
       await cacheService.cacheServices(processedServices);
-      
+
       return processedServices;
     } catch (error) {
       logger.error('❌ Get services error:', error);
@@ -308,7 +378,7 @@ class SmsActivateService {
       }
 
       const response = await this.makeRequest('getCountries');
-      
+
       let countries;
       if (typeof response === 'string') {
         try {
@@ -341,40 +411,40 @@ class SmsActivateService {
   }
 
   async getOperators(country) {
-  try {
-    const cacheKey = `sms:operators:${country}`;
-    const cached = await cacheService.get(cacheKey);
-    if (cached) {
-      logger.info(`📡 Using cached operators for country ${country}`);
-      return cached;
-    }
-
-    const response = await this.makeRequest('getOperators', { country });
-    
-    // Handle SMS-Activate response format
-    let processedResponse;
-    if (typeof response === 'object' && response.status === 'success') {
-      // Return the full response for route to handle
-      processedResponse = response;
-    } else if (typeof response === 'string') {
-      try {
-        processedResponse = JSON.parse(response);
-      } catch (e) {
-        logger.warn(`Failed to parse operators response for country ${country}:`, response);
-        processedResponse = { status: 'success', countryOperators: {} };
+    try {
+      const cacheKey = `sms:operators:${country}`;
+      const cached = await cacheService.get(cacheKey);
+      if (cached) {
+        logger.info(`📡 Using cached operators for country ${country}`);
+        return cached;
       }
-    } else {
-      processedResponse = response;
-    }
 
-    await cacheService.set(cacheKey, processedResponse, 3600); // Cache for 1 hour
-    return processedResponse;
-  } catch (error) {
-    logger.error('❌ Get operators error:', error);
-    // Return empty response instead of throwing
-    return { status: 'success', countryOperators: {} };
+      const response = await this.makeRequest('getOperators', { country });
+
+      // Handle SMS-Activate response format
+      let processedResponse;
+      if (typeof response === 'object' && response.status === 'success') {
+        // Return the full response for route to handle
+        processedResponse = response;
+      } else if (typeof response === 'string') {
+        try {
+          processedResponse = JSON.parse(response);
+        } catch (e) {
+          logger.warn(`Failed to parse operators response for country ${country}:`, response);
+          processedResponse = { status: 'success', countryOperators: {} };
+        }
+      } else {
+        processedResponse = response;
+      }
+
+      await cacheService.set(cacheKey, processedResponse, 3600); // Cache for 1 hour
+      return processedResponse;
+    } catch (error) {
+      logger.error('❌ Get operators error:', error);
+      // Return empty response instead of throwing
+      return { status: 'success', countryOperators: {} };
+    }
   }
-}
   // ENHANCED: Better price extraction with freePriceMap handling
   async getPrices(country = null, service = null, operator = null) {
     try {
@@ -390,7 +460,7 @@ class SmsActivateService {
       if (service) params.service = service;
 
       const response = await this.makeRequest('getPricesExtended', params);
-      
+
       let prices;
       if (typeof response === 'string') {
         try {
@@ -405,7 +475,7 @@ class SmsActivateService {
       // ENHANCED: Process prices to extract real prices from freePriceMap
       const processedPrices = this.processPricesWithFreePriceMap(prices);
 
-      await cacheService.set(cacheKey, processedPrices, 1200); // Cache for 20 minutes
+    await cacheService.set(cacheKey, processedPrices, 60); // 1 min
       return processedPrices;
     } catch (error) {
       logger.error('❌ Get prices error:', error);
@@ -431,11 +501,11 @@ class SmsActivateService {
             // CRITICAL: Extract real price from freePriceMap - use LOWEST price as default
             if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
               const actualPrices = Object.keys(serviceData.freePriceMap).map(p => parseFloat(p));
-              
+
               // Sort prices ascending and get the lowest (cheapest) price as default
               actualPrices.sort((a, b) => a - b);
               realPrice = actualPrices[0]; // Use the cheapest price as default
-              
+
               // Get count for the cheapest price
               const cheapestPriceStr = realPrice.toFixed(4);
               const priceMapCount = parseInt(serviceData.freePriceMap[cheapestPriceStr] || 0);
@@ -467,7 +537,7 @@ class SmsActivateService {
     const params = {};
     if (country) params.country = country;
     if (operator) params.operator = operator;
-    
+
     try {
       const cacheKey = `sms:numbers_status:${country || 'all'}:${operator || 'all'}`;
       const cached = await cacheService.get(cacheKey);
@@ -477,7 +547,7 @@ class SmsActivateService {
       }
 
       const response = await this.makeRequest('getNumbersStatus', params);
-      
+
       // Cache the response for 5 minutes
       await cacheService.set(cacheKey, response, 300);
       return response;
@@ -488,23 +558,23 @@ class SmsActivateService {
   }
 
   // ... (rest of the methods remain the same)
-  
+
   async getNumber(service, country = null, operator = null, maxPrice = null) {
     const params = { service };
     if (country) params.country = country;
     if (operator) params.operator = operator;
-    
+
     try {
       logger.info('📱 Purchasing number:', params);
       const response = await this.makeRequest('getNumber', params);
-      
+
       if (typeof response === 'string') {
         const parts = response.split(':');
         const status = parts[0];
-        
+
         if (status === 'ACCESS_NUMBER') {
-          return { 
-            id: parts[1], 
+          return {
+            id: parts[1],
             number: parts[2],
             status: 'purchased'
           };
@@ -512,7 +582,7 @@ class SmsActivateService {
           throw new Error(this.parseErrorResponse(response) || response);
         }
       }
-      
+
       throw new Error('Invalid number response format');
     } catch (error) {
       logger.error('❌ Get number error:', error);
@@ -523,15 +593,15 @@ class SmsActivateService {
   async setStatus(id, status, forward = null) {
     const params = { id, status };
     if (forward) params.forward = forward;
-    
+
     try {
       logger.info('⚙️ Setting status:', params);
       const response = await this.makeRequest('setStatus', params);
-      
+
       if (typeof response === 'string' && response === 'ACCESS_READY') {
         return { success: true, message: 'Status updated successfully' };
       }
-      
+
       return response;
     } catch (error) {
       logger.error('❌ Set status error:', error);
@@ -543,7 +613,7 @@ class SmsActivateService {
     try {
       logger.info('📋 Getting status for:', id);
       const response = await this.makeRequest('getStatus', { id });
-      
+
       if (typeof response === 'string') {
         if (response.startsWith('STATUS_')) {
           const parts = response.split(':');
@@ -559,7 +629,7 @@ class SmsActivateService {
           }
         }
       }
-      
+
       return { status: 'unknown', code: null, text: null };
     } catch (error) {
       logger.error('❌ Get status error:', error);
@@ -571,12 +641,12 @@ class SmsActivateService {
     try {
       logger.info('📨 Getting full SMS for:', id);
       const response = await this.makeRequest('getFullSms', { id });
-      
+
       if (typeof response === 'string' && response.startsWith('FULL_SMS:')) {
         const smsText = response.substring('FULL_SMS:'.length);
         return { success: true, text: smsText };
       }
-      
+
       throw new Error(this.parseErrorResponse(response) || 'Failed to get full SMS');
     } catch (error) {
       logger.error('❌ Get full SMS error:', error);
@@ -590,23 +660,26 @@ class SmsActivateService {
 
   isErrorResponse(response) {
     if (typeof response !== 'string') return false;
-    return response.startsWith('ERROR') || 
-           response === 'BAD_KEY' || 
-           response === 'BAD_ACTION' ||
-           response === 'NO_BALANCE' ||
-           response === 'NO_NUMBERS' ||
-           response === 'WRONG_DOMAIN';
+    return response.startsWith('ERROR') ||
+      response === 'BAD_KEY' ||
+      response === 'BAD_ACTION' ||
+      response === 'NO_BALANCE' ||
+      response === 'NO_NUMBERS' ||
+      response === 'WRONG_DOMAIN';
   }
 
   // ADDED: Get queue status for debugging
   getQueueStatus() {
-    return {
-      queueLength: this.requestQueue.length,
-      isProcessing: this.isProcessingQueue,
-      rateLimitActive: this.rateLimitResetTime && Date.now() < this.rateLimitResetTime,
-      rateLimitResetTime: this.rateLimitResetTime
-    };
-  }
+  return {
+    readQueue: this.readQueue.length,
+    writeQueue: this.writeQueue.length,
+    activeReads: this.currentRead,
+    activeWrites: this.currentWrite,
+    rateLimitActive: this.globalRateLimitReset && Date.now() < this.globalRateLimitReset,
+    rateLimitResetTime: this.globalRateLimitReset
+  };
+}
+
 }
 
 module.exports = new SmsActivateService();
