@@ -608,27 +608,9 @@ const BuyNumber: React.FC = () => {
               balanceLoading={payment.loading.balance}
             />
 
-            {/* Restrictions - Mobile Optimized */}
-            {/* {getCurrentRestrictions() && (
-              <div className="mt-4 lg:mt-6">
-                <button
-                  onClick={() => setShowRestrictions(!showRestrictions)}
-                  className="flex items-center text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
-                >
-                  <Info className="h-4 w-4 mr-1" />
-                  {showRestrictions ? 'Hide' : 'Show'} Service Information
-                </button>
-
-                {showRestrictions && (
-                  <div className="mt-3 p-4 bg-blue-50 rounded-lg">
-                    <RestrictionsDisplay restrictions={getCurrentRestrictions()} />
-                  </div>
-                )}
-              </div>
-            )} */}
 
             {/* Error Display - Add this before the purchase button */}
-            {numbersError && (
+            {numbersError && clearError &&  (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-start space-x-3">
                   <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -777,53 +759,5 @@ const StepIndicator: React.FC<{
 const StepConnector: React.FC<{ isCompleted: boolean }> = ({ isCompleted }) => (
   <div className={`w-8 lg:w-16 h-1 rounded ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`}></div>
 );
-
-// Restrictions Display Component
-// const RestrictionsDisplay: React.FC<{ restrictions: any }> = ({ restrictions }) => {
-//   if (!restrictions) return null;
-
-//   return (
-//     <div className="space-y-3">
-//       {restrictions.serviceAvailable !== undefined && (
-//         <div className={`flex items-center ${restrictions.serviceAvailable ? 'text-green-700' : 'text-red-700'}`}>
-//           <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
-//           <span className="text-sm">
-//             Service {restrictions.serviceAvailable ? 'available' : 'not available'}
-//           </span>
-//         </div>
-//       )}
-
-//       {restrictions.availableOperators && (
-//         <div className="text-sm text-gray-700">
-//           <strong>Available operators:</strong> {restrictions.availableOperators}
-//         </div>
-//       )}
-
-//       {restrictions.currentStock && (
-//         <div className="text-sm text-gray-700">
-//           <strong>Current stock:</strong> {restrictions.currentStock} numbers
-//         </div>
-//       )}
-
-//       {restrictions.priceRange && (
-//         <div className="text-sm text-gray-700">
-//           <strong>Price range:</strong> ${restrictions.priceRange.min} - ${restrictions.priceRange.max}
-//           (avg: ${restrictions.priceRange.average})
-//         </div>
-//       )}
-
-//       {restrictions.recommendations && restrictions.recommendations.length > 0 && (
-//         <div className="space-y-2">
-//           <strong className="text-sm text-gray-700">Recommendations:</strong>
-//           {restrictions.recommendations.map((rec: any, index: number) => (
-//             <div key={index} className="text-sm text-gray-600 ml-2">
-//               • {rec.message} {rec.action && `- ${rec.action}`}
-//             </div>
-//           ))}
-//         </div>
-//       )}
-//     </div>
-//   );
-// };
 
 export default BuyNumber;
