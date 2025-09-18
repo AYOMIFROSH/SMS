@@ -79,22 +79,44 @@ const BuyNumber: React.FC = () => {
 
   // Fetch operators when country is selected
   useEffect(() => {
-    if (selectedCountry && selectedService) {
-      console.log('📡 Fetching available operators for service:', { country: selectedCountry, service: selectedService });
-      dispatch(fetchOperators(selectedCountry));
-      // After operators are loaded, we'll filter them by availability in the component
-    }
-  }, [selectedCountry, selectedService, dispatch]);
-  // Fetch prices when service and country are selected
-  useEffect(() => {
-    if (selectedCountry && selectedService) {
-      console.log('💲 Fetching prices for:', { country: selectedCountry, service: selectedService });
-      dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
+  if (selectedCountry && selectedService) {
+    const fetchDataSequentially = async () => {
+      try {
+        console.log('🔄 Starting sequential data fetch for:', { selectedCountry, selectedService });
+        
+        // Step 1: Fetch prices first (most important)
+        console.log('📊 Fetching prices...');
+        await dispatch(fetchPrices({ country: selectedCountry, service: selectedService })).unwrap();
+        
+        // Step 2: Wait 1 second, then fetch operators
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('📡 Fetching operators...');
+        await dispatch(fetchOperators(selectedCountry)).unwrap();
+        
+        // Step 3: Wait 1 second, then fetch restrictions
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('📋 Fetching restrictions...');
+        await dispatch(fetchRestrictions({ country: selectedCountry, service: selectedService })).unwrap();
+        
+        console.log('✅ All data fetched successfully');
+      } catch (error) {
+        console.error('❌ Sequential fetch failed:', error);
+        // Continue anyway - some data might have loaded
+      }
+    };
 
-      // Fetch restrictions
-      dispatch(fetchRestrictions({ country: selectedCountry, service: selectedService }));
-    }
-  }, [selectedCountry, selectedService, dispatch]);
+    fetchDataSequentially();
+  }
+}, [selectedCountry, selectedService, dispatch]);
+
+// ALSO FIX: The operators fetching logic - remove the service-specific filtering
+useEffect(() => {
+  if (selectedCountry) {
+    console.log('📡 Fetching available operators for country:', selectedCountry);
+    // Just fetch all operators for country, don't filter by service here
+    dispatch(fetchOperators(selectedCountry));
+  }
+}, [selectedCountry, dispatch]);
 
   const handleCountrySelect = (countryCode: string) => {
     dispatch(setSelectedCountry(countryCode));
