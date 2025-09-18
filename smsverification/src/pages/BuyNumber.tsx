@@ -8,7 +8,6 @@ import {
   fetchCountries,
   fetchOperators,
   fetchPrices,
-  fetchRestrictions,
   setSelectedCountry,
   setSelectedService,
   setSelectedOperator
@@ -21,7 +20,7 @@ import OperatorSelector from '@/components/services/OperatorSelector';
 import PriceDisplay from '@/components/services/PriceDisplay';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
-import { AlertCircle, CheckCircle, Info, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
@@ -35,7 +34,6 @@ const BuyNumber: React.FC = () => {
     countries,
     operators,
     prices,
-    restrictions,
     selectedCountry,
     selectedService,
     selectedOperator,
@@ -45,24 +43,38 @@ const BuyNumber: React.FC = () => {
     error
   } = useSelector((state: RootState) => state.services);
 
-  const { purchasing } = useSelector((state: RootState) => state.numbers);
+ const { purchasing } = useSelector((state: RootState) => state.numbers);
   const numbersError = useSelector((state: RootState) => state.numbers.error);
 
-  // Use payment hook for real-time balance
   const payment = usePayment({ autoFetch: true, enableWebSocket: true });
 
   const [step, setStep] = useState<'country' | 'service' | 'operator' | 'confirm'>('country');
   const [searchQuery, setSearchQuery] = useState('');
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
-  const [showRestrictions, setShowRestrictions] = useState(false);
   const [showMobileSummary, setShowMobileSummary] = useState(false);
 
-  // Initialize data
+  // Initialize data - ONLY ONCE
   useEffect(() => {
     console.log('🚀 BuyNumber: Initializing data fetch');
     dispatch(fetchServices());
     dispatch(fetchCountries());
   }, [dispatch]);
+
+  // FIXED: Only fetch operators when country is selected AND we don't have them cached
+  useEffect(() => {
+    if (selectedCountry && !operators[selectedCountry]) {
+      console.log('📡 Fetching operators for country:', selectedCountry);
+      dispatch(fetchOperators(selectedCountry));
+    }
+  }, [selectedCountry, dispatch, operators]);
+
+  // FIXED: Only fetch prices when we're at confirm step AND we need them
+  useEffect(() => {
+    if (selectedCountry && selectedService && step === 'confirm' && !prices[selectedCountry]?.[selectedService]) {
+      console.log('💲 Fetching prices for confirmation:', { country: selectedCountry, service: selectedService });
+      dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
+    }
+  }, [selectedCountry, selectedService, step, dispatch, prices]);
 
   // Handle step progression
   useEffect(() => {
@@ -76,47 +88,6 @@ const BuyNumber: React.FC = () => {
       setStep('country');
     }
   }, [selectedCountry, selectedService, selectedOperator]);
-
-  // Fetch operators when country is selected
-  useEffect(() => {
-  if (selectedCountry && selectedService) {
-    const fetchDataSequentially = async () => {
-      try {
-        console.log('🔄 Starting sequential data fetch for:', { selectedCountry, selectedService });
-        
-        // Step 1: Fetch prices first (most important)
-        console.log('📊 Fetching prices...');
-        await dispatch(fetchPrices({ country: selectedCountry, service: selectedService })).unwrap();
-        
-        // Step 2: Wait 1 second, then fetch operators
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('📡 Fetching operators...');
-        await dispatch(fetchOperators(selectedCountry)).unwrap();
-        
-        // Step 3: Wait 1 second, then fetch restrictions
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('📋 Fetching restrictions...');
-        await dispatch(fetchRestrictions({ country: selectedCountry, service: selectedService })).unwrap();
-        
-        console.log('✅ All data fetched successfully');
-      } catch (error) {
-        console.error('❌ Sequential fetch failed:', error);
-        // Continue anyway - some data might have loaded
-      }
-    };
-
-    fetchDataSequentially();
-  }
-}, [selectedCountry, selectedService, dispatch]);
-
-// ALSO FIX: The operators fetching logic - remove the service-specific filtering
-useEffect(() => {
-  if (selectedCountry) {
-    console.log('📡 Fetching available operators for country:', selectedCountry);
-    // Just fetch all operators for country, don't filter by service here
-    dispatch(fetchOperators(selectedCountry));
-  }
-}, [selectedCountry, dispatch]);
 
   const handleCountrySelect = (countryCode: string) => {
     dispatch(setSelectedCountry(countryCode));
@@ -213,28 +184,27 @@ useEffect(() => {
   };
 
   const getCurrentPrice = () => {
-  if (!prices || !selectedCountry || !selectedService) return null;
+    if (!prices || !selectedCountry || !selectedService) return null;
 
-  const countryPrices = prices[selectedCountry];
-  if (!countryPrices) return null;
+    const countryPrices = prices[selectedCountry];
+    if (!countryPrices) return null;
 
-  const servicePrices = countryPrices[selectedService];
-  if (!servicePrices) return null;
+    const servicePrices = countryPrices[selectedService];
+    if (!servicePrices) return null;
 
-  let realPrice = 0;
+    let realPrice = 0;
 
-  if (selectedOperator && servicePrices[selectedOperator]) {
-    const operatorPrice = servicePrices[selectedOperator];
-    // Use realPrice if available, otherwise fall back to cost
-    realPrice = Number(operatorPrice.realPrice || operatorPrice.cost || 0);
-  } else {
-    // Use realPrice if available, otherwise fall back to cost
-    realPrice = Number(servicePrices.realPrice || servicePrices.cost || 0);
-  }
+    if (selectedOperator && servicePrices[selectedOperator]) {
+      const operatorPrice = servicePrices[selectedOperator];
+      realPrice = Number(operatorPrice.realPrice || operatorPrice.cost || 0);
+    } else {
+      realPrice = Number(servicePrices.realPrice || servicePrices.cost || 0);
+    }
 
-  // BONUS SYSTEM: Return total price (real + 100% bonus)
-  return realPrice * 2; // User pays double the real price
-};
+    // BONUS SYSTEM: Return total price (real + 100% bonus)
+    return realPrice * 2; // User pays double the real price
+  };
+
   const canAfford = () => {
     const price = getCurrentPrice();
     const currentBalance = payment.balance?.balance ?? 0;
@@ -248,7 +218,6 @@ useEffect(() => {
     dispatch(setSelectedOperator(null));
     setStep('country');
     setMaxPrice(null);
-    setShowRestrictions(false);
   };
 
   const refreshData = () => {
@@ -261,12 +230,6 @@ useEffect(() => {
     if (selectedCountry && selectedService) {
       dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
     }
-  };
-
-  const getCurrentRestrictions = () => {
-    if (!selectedCountry || !selectedService) return null;
-    const key = `${selectedCountry}-${selectedService}`;
-    return restrictions[key];
   };
 
   const getCurrentOperators = () => {
@@ -579,7 +542,7 @@ useEffect(() => {
 
         {step === 'operator' && selectedCountry && selectedService && (
           <OperatorSelector
-            operators={getCurrentOperators()}
+            operators={operators[selectedCountry] || []}
             selectedOperator={selectedOperator}
             onSelect={handleOperatorSelect}
             loading={operatorsLoading}
@@ -646,7 +609,7 @@ useEffect(() => {
             />
 
             {/* Restrictions - Mobile Optimized */}
-            {getCurrentRestrictions() && (
+            {/* {getCurrentRestrictions() && (
               <div className="mt-4 lg:mt-6">
                 <button
                   onClick={() => setShowRestrictions(!showRestrictions)}
@@ -662,7 +625,7 @@ useEffect(() => {
                   </div>
                 )}
               </div>
-            )}
+            )} */}
 
             {/* Error Display - Add this before the purchase button */}
             {numbersError && (
@@ -816,51 +779,51 @@ const StepConnector: React.FC<{ isCompleted: boolean }> = ({ isCompleted }) => (
 );
 
 // Restrictions Display Component
-const RestrictionsDisplay: React.FC<{ restrictions: any }> = ({ restrictions }) => {
-  if (!restrictions) return null;
+// const RestrictionsDisplay: React.FC<{ restrictions: any }> = ({ restrictions }) => {
+//   if (!restrictions) return null;
 
-  return (
-    <div className="space-y-3">
-      {restrictions.serviceAvailable !== undefined && (
-        <div className={`flex items-center ${restrictions.serviceAvailable ? 'text-green-700' : 'text-red-700'}`}>
-          <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
-          <span className="text-sm">
-            Service {restrictions.serviceAvailable ? 'available' : 'not available'}
-          </span>
-        </div>
-      )}
+//   return (
+//     <div className="space-y-3">
+//       {restrictions.serviceAvailable !== undefined && (
+//         <div className={`flex items-center ${restrictions.serviceAvailable ? 'text-green-700' : 'text-red-700'}`}>
+//           <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+//           <span className="text-sm">
+//             Service {restrictions.serviceAvailable ? 'available' : 'not available'}
+//           </span>
+//         </div>
+//       )}
 
-      {restrictions.availableOperators && (
-        <div className="text-sm text-gray-700">
-          <strong>Available operators:</strong> {restrictions.availableOperators}
-        </div>
-      )}
+//       {restrictions.availableOperators && (
+//         <div className="text-sm text-gray-700">
+//           <strong>Available operators:</strong> {restrictions.availableOperators}
+//         </div>
+//       )}
 
-      {restrictions.currentStock && (
-        <div className="text-sm text-gray-700">
-          <strong>Current stock:</strong> {restrictions.currentStock} numbers
-        </div>
-      )}
+//       {restrictions.currentStock && (
+//         <div className="text-sm text-gray-700">
+//           <strong>Current stock:</strong> {restrictions.currentStock} numbers
+//         </div>
+//       )}
 
-      {restrictions.priceRange && (
-        <div className="text-sm text-gray-700">
-          <strong>Price range:</strong> ${restrictions.priceRange.min} - ${restrictions.priceRange.max}
-          (avg: ${restrictions.priceRange.average})
-        </div>
-      )}
+//       {restrictions.priceRange && (
+//         <div className="text-sm text-gray-700">
+//           <strong>Price range:</strong> ${restrictions.priceRange.min} - ${restrictions.priceRange.max}
+//           (avg: ${restrictions.priceRange.average})
+//         </div>
+//       )}
 
-      {restrictions.recommendations && restrictions.recommendations.length > 0 && (
-        <div className="space-y-2">
-          <strong className="text-sm text-gray-700">Recommendations:</strong>
-          {restrictions.recommendations.map((rec: any, index: number) => (
-            <div key={index} className="text-sm text-gray-600 ml-2">
-              • {rec.message} {rec.action && `- ${rec.action}`}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+//       {restrictions.recommendations && restrictions.recommendations.length > 0 && (
+//         <div className="space-y-2">
+//           <strong className="text-sm text-gray-700">Recommendations:</strong>
+//           {restrictions.recommendations.map((rec: any, index: number) => (
+//             <div key={index} className="text-sm text-gray-600 ml-2">
+//               • {rec.message} {rec.action && `- ${rec.action}`}
+//             </div>
+//           ))}
+//         </div>
+//       )}
+//     </div>
+//   );
+// };
 
 export default BuyNumber;
