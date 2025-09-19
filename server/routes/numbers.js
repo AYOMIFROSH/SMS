@@ -18,6 +18,9 @@ router.use(rateLimiters.sms);
 
 // UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
 // UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
+
+let cooldownMs = 45000;
+
 router.post('/purchase',
   authenticateToken,
   [
@@ -338,6 +341,11 @@ router.post('/purchase',
         return res.status(400).json({
           error: 'Invalid service code',
           code: 'INVALID_SERVICE'
+        });
+      } else if (error.message.includes('Rate limit exceeded')) {
+        return res.status(429).json({
+          error: `Our provider is getting the best number for you. Please try again in ${Math.ceil(cooldownMs/1000)} seconds.`,
+          code: 'RATE_LIMIT_EXCEEDED'
         });
       }
 
