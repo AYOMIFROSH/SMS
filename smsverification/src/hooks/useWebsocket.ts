@@ -1,4 +1,4 @@
-// src/hooks/useWebsocket.ts - Fixed unused variables and improved functionality
+// src/hooks/useWebsocket.ts - FIXED: Remove duplicate purchase notifications
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '@/store/store';
@@ -26,7 +26,7 @@ interface WebSocketConfig {
   maxQueueSize?: number;
   enableDeduplication?: boolean;
   enableMetrics?: boolean;
-  messageCleanupInterval?: number; // Added this to the interface
+  messageCleanupInterval?: number;
 }
 
 interface ConnectionMetrics {
@@ -47,7 +47,7 @@ const DEFAULT_CONFIG: Required<WebSocketConfig> = {
   maxQueueSize: 100,
   enableDeduplication: true,
   enableMetrics: true,
-  messageCleanupInterval: 300000 // 5 minutes - cleanup old processed messages
+  messageCleanupInterval: 300000 // 5 minutes
 };
 
 // SINGLETON WEBSOCKET MANAGER - This prevents multiple connections
@@ -56,7 +56,7 @@ class GlobalWebSocketManager {
   private ws: WebSocket | null = null;
   private reconnectTimeout: number | undefined = undefined;
   private heartbeatTimeout: number | undefined = undefined;
-  private messageCleanupInterval: number | undefined = undefined; // Fixed: Now properly used
+  private messageCleanupInterval: number | undefined = undefined;
   private reconnectAttempts = 0;
   private isConnecting = false;
   private messageQueue: WebSocketMessage[] = [];
@@ -65,7 +65,7 @@ class GlobalWebSocketManager {
   private subscribers = new Set<(data: any) => void>();
   private stateSubscribers = new Set<() => void>();
   private connectionShownOnce = false;
-  private config: Required<WebSocketConfig> = DEFAULT_CONFIG; // Store config in instance
+  private config: Required<WebSocketConfig> = DEFAULT_CONFIG;
 
   // Connection state
   private isConnected = false;
@@ -90,7 +90,6 @@ class GlobalWebSocketManager {
   // Method to update configuration
   updateConfig(newConfig: Partial<WebSocketConfig>) {
     this.config = { ...this.config, ...newConfig };
-    // Restart cleanup interval if it changed
     if (newConfig.messageCleanupInterval !== undefined) {
       this.startMessageCleanup();
     }
@@ -123,14 +122,13 @@ class GlobalWebSocketManager {
   }
 
   private notifyMessageSubscribers(message: WebSocketMessage) {
-    // Message deduplication - only if enabled in config
+    // Message deduplication
     if (this.config.enableDeduplication && message.messageId && this.processedMessages.has(message.messageId)) {
       return;
     }
 
     if (this.config.enableDeduplication && message.messageId) {
       this.processedMessages.add(message.messageId);
-      // Cleanup will be handled by the interval
     }
 
     this.subscribers.forEach(callback => {
@@ -142,7 +140,6 @@ class GlobalWebSocketManager {
     });
   }
 
-  // Fixed: Now properly implements message cleanup
   private startMessageCleanup() {
     if (this.messageCleanupInterval !== undefined) {
       window.clearInterval(this.messageCleanupInterval);
@@ -151,16 +148,14 @@ class GlobalWebSocketManager {
 
     if (this.config.enableDeduplication) {
       this.messageCleanupInterval = window.setInterval(() => {
-        // Keep only recent messages to prevent memory leaks
         if (this.processedMessages.size > 1000) {
           const messages = Array.from(this.processedMessages);
           this.processedMessages = new Set(messages.slice(-500));
         }
         
-        // Also cleanup old ping times
         const now = Date.now();
         for (const [pingId, pingTime] of this.pingTimes.entries()) {
-          if (now - pingTime > 60000) { // Remove pings older than 1 minute
+          if (now - pingTime > 60000) {
             this.pingTimes.delete(pingId);
           }
         }
@@ -235,7 +230,6 @@ class GlobalWebSocketManager {
       this.heartbeatTimeout = undefined;
     }
 
-    // Fixed: Now properly clears message cleanup interval
     if (this.messageCleanupInterval !== undefined) {
       window.clearInterval(this.messageCleanupInterval);
       this.messageCleanupInterval = undefined;
@@ -261,7 +255,6 @@ class GlobalWebSocketManager {
       }
     }, this.config.heartbeatInterval);
 
-    // Start message cleanup when connection is established
     this.startMessageCleanup();
   }
 
@@ -289,7 +282,6 @@ class GlobalWebSocketManager {
   }
 
   connect(user: any, enabled: boolean = true) {
-    // Return early if already connected or connecting
     if (!enabled || this.isConnecting || this.ws?.readyState === WebSocket.OPEN) {
       return;
     }
@@ -338,7 +330,6 @@ class GlobalWebSocketManager {
         
         this.reconnectAttempts = 0;
 
-        // Only show connection toast once per session, not on every reconnect
         if (!this.connectionShownOnce) {
           toast.success('Real-time updates connected', {
             icon: '🔗',
@@ -391,11 +382,11 @@ class GlobalWebSocketManager {
         switch (event.code) {
           case 1008: // Policy violation (auth failure)
             this.connectionError = 'Authentication failed';
-            return; // Don't attempt to reconnect
+            return;
 
           case 1000: // Normal closure
           case 1001: // Going away
-            return; // Don't attempt to reconnect for normal closures
+            return;
 
           default:
             if (!event.wasClean) {
@@ -498,26 +489,22 @@ class GlobalWebSocketManager {
   }
 }
 
-// Fixed: Now properly uses the config parameter
 const useWebSocket = (
   onMessage?: (data: any) => void,
   enabled: boolean = true,
-  config: WebSocketConfig = {} // Fixed: Now properly used
+  config: WebSocketConfig = {}
 ) => {
   const dispatch = useDispatch();
   const { user, isAuthenticated, initialized } = useSelector((state: RootState) => state.auth);
   
-  // Get singleton instance and apply config
   const wsManager = useMemo(() => {
     const manager = GlobalWebSocketManager.getInstance();
-    // Apply config if provided
     if (Object.keys(config).length > 0) {
       manager.updateConfig(config);
     }
     return manager;
-  }, []); // Don't include config in deps to avoid recreation
+  }, []);
 
-  // Update config when it changes
   useEffect(() => {
     if (Object.keys(config).length > 0) {
       wsManager.updateConfig(config);
@@ -526,13 +513,11 @@ const useWebSocket = (
 
   const [state, setState] = useState(() => wsManager.getState());
 
-  // Keep callback stable
   const onMessageRef = useRef(onMessage);
   useEffect(() => {
     onMessageRef.current = onMessage;
   }, [onMessage]);
 
-  // Subscribe to state changes
   useEffect(() => {
     const unsubscribeState = wsManager.subscribeToState(() => {
       setState(wsManager.getState());
@@ -541,7 +526,7 @@ const useWebSocket = (
     return unsubscribeState;
   }, [wsManager]);
 
-  // Handle WebSocket messages - YOUR EXISTING MESSAGE HANDLING LOGIC
+  // FIXED: Handle WebSocket messages - REMOVED duplicate purchase notification
   const handleMessage = useCallback((message: WebSocketMessage) => {
     // Verify message is for current user (security check)
     if (message.userId && user?.id && message.userId !== user.id) {
@@ -569,22 +554,9 @@ const useWebSocket = (
         break;
 
       case 'number_purchased':
+        // ONLY update the store - NO toast notification here (BuyNumber.tsx handles it)
         dispatch(addNewPurchase(message.data));
-        toast.success('Number purchased successfully!', {
-          icon: '🎉',
-          duration: 4000
-        });
-        
-        // Show pricing info if available
-        if (message.data.pricing) {
-          const { totalPrice } = message.data.pricing;
-          setTimeout(() => {
-            toast.success(`Total paid: $${totalPrice.toFixed(4)}`, {
-              icon: '💰',
-              duration: 3000
-            });
-          }, 1000);
-        }
+        console.log('📱 WebSocket: Number purchase confirmed via WebSocket');
         break;
 
       case 'balance_updated':
@@ -642,25 +614,20 @@ const useWebSocket = (
     onMessageRef.current?.(message);
   }, [dispatch, user?.id]);
 
-  // Subscribe to messages
   useEffect(() => {
     const unsubscribeMessages = wsManager.subscribe(handleMessage);
     return unsubscribeMessages;
   }, [wsManager, handleMessage]);
 
-  // Main connection management - Only connect if not already connected
   useEffect(() => {
     if (enabled && isAuthenticated && initialized && user) {
       wsManager.connect(user, true);
     }
-    // Don't disconnect on unmount - let the singleton manage its lifecycle
   }, [enabled, isAuthenticated, initialized, user?.id, wsManager]);
 
-  // Cleanup function for individual hook instances
   useEffect(() => {
     return () => {
       // Individual hooks don't disconnect the shared connection
-      // The singleton manages its own lifecycle
     };
   }, []);
 

@@ -1,4 +1,4 @@
-// src/store/slices/numbersSlice.ts - Enhanced with new features and better error handling
+// src/store/slices/numbersSlice.ts - FIXED: Remove duplicate purchase notification
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { numbersApi, PurchaseRequest } from '@/api/numbers';
 import { NumberPurchase, Subscription } from '@/types';
@@ -162,7 +162,6 @@ export const completeNumber = createAsyncThunk(
   }
 );
 
-
 // Retry SMS for number
 export const retryNumber = createAsyncThunk(
   'numbers/retry',
@@ -266,14 +265,14 @@ const numbersSlice = createSlice({
       }
     },
 
-    // Add new purchase (used by WebSocket)
+    // Add new purchase (used by WebSocket) - REMOVED toast notification
     addNewPurchase: (state, action) => {
       const newPurchase = action.payload;
       // Avoid duplicates
       const exists = state.activeNumbers.find(n => n.activation_id === newPurchase.activation_id);
       if (!exists) {
         state.activeNumbers.unshift(newPurchase);
-        console.log('➕ Added new purchase:', newPurchase);
+        console.log('➕ Added new purchase via WebSocket:', newPurchase);
       }
     },
 
@@ -309,7 +308,7 @@ const numbersSlice = createSlice({
 
   extraReducers: (builder) => {
     builder
-      // Purchase Number
+      // Purchase Number - REMOVED duplicate success toast
       .addCase(purchaseNumber.pending, (state) => {
         state.purchasing = true;
         state.error = null;
@@ -318,15 +317,14 @@ const numbersSlice = createSlice({
       .addCase(purchaseNumber.fulfilled, (state) => {
         state.purchasing = false;
         state.error = null;
-        console.log('✅ Purchase: Completed successfully');
+        console.log('✅ Purchase: Completed successfully (notification handled by BuyNumber.tsx)');
       })
-      // In numbersSlice.ts, update the purchaseNumber.rejected case:
-      // In numbersSlice.ts, make sure purchaseNumber.rejected looks like this:
       .addCase(purchaseNumber.rejected, (state, action) => {
         state.purchasing = false;
         state.error = action.payload as string || 'Failed to purchase number';
         console.error('❌ Purchase: Failed with error:', state.error);
       })
+
       // Fetch Active Numbers
       .addCase(fetchActiveNumbers.pending, (state) => {
         state.loading = true;
@@ -410,6 +408,7 @@ const numbersSlice = createSlice({
         state.error = action.payload as string || 'Failed to complete number';
         console.error('❌ Complete failed:', state.error);
       })
+
       // Retry Number
       .addCase(retryNumber.fulfilled, (state, action) => {
         const { id, newExpiryDate } = action.payload;

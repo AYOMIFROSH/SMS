@@ -1,4 +1,4 @@
-// src/pages/BuyNumber.tsx - Updated to use real-time payment balance
+// src/pages/BuyNumber.tsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/store/store';
@@ -20,7 +20,7 @@ import OperatorSelector from '@/components/services/OperatorSelector';
 import PriceDisplay from '@/components/services/PriceDisplay';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
-import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
@@ -43,7 +43,7 @@ const BuyNumber: React.FC = () => {
     error
   } = useSelector((state: RootState) => state.services);
 
- const { purchasing } = useSelector((state: RootState) => state.numbers);
+  const { purchasing } = useSelector((state: RootState) => state.numbers);
   const numbersError = useSelector((state: RootState) => state.numbers.error);
 
   const payment = usePayment({ autoFetch: true, enableWebSocket: true });
@@ -52,6 +52,54 @@ const BuyNumber: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [showMobileSummary, setShowMobileSummary] = useState(false);
+  
+  // Rate limit handling
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    active: boolean;
+    message: string;
+    countdown: number;
+  } | null>(null);
+
+  // Error auto-clear timer
+  useEffect(() => {
+    if (numbersError) {
+      const timer = setTimeout(() => {
+        dispatch(clearError());
+      }, 8000); // Clear error after 8 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [numbersError, dispatch]);
+
+  // Clear error on selection reset
+  useEffect(() => {
+    if (numbersError && (selectedCountry || selectedService || selectedOperator)) {
+      const timer = setTimeout(() => {
+        dispatch(clearError());
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [selectedCountry, selectedService, selectedOperator, numbersError, dispatch]);
+
+  // Rate limit countdown
+  useEffect(() => {
+    if (rateLimitInfo?.active && rateLimitInfo.countdown > 0) {
+      const timer = setInterval(() => {
+        setRateLimitInfo(prev => {
+          if (!prev || prev.countdown <= 1) {
+            return null;
+          }
+          return {
+            ...prev,
+            countdown: prev.countdown - 1
+          };
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [rateLimitInfo]);
 
   // Initialize data - ONLY ONCE
   useEffect(() => {
@@ -60,21 +108,42 @@ const BuyNumber: React.FC = () => {
     dispatch(fetchCountries());
   }, [dispatch]);
 
-  // FIXED: Only fetch operators when country is selected AND we don't have them cached
+  // Fetch operators with delay to prevent rapid API calls
   useEffect(() => {
     if (selectedCountry && !operators[selectedCountry]) {
-      console.log('📡 Fetching operators for country:', selectedCountry);
-      dispatch(fetchOperators(selectedCountry));
+      console.log('📡 Scheduling operator fetch for country:', selectedCountry);
+      
+      const timer = setTimeout(() => {
+        dispatch(fetchOperators(selectedCountry));
+      }, 500); // Add 500ms delay
+      
+      return () => clearTimeout(timer);
     }
   }, [selectedCountry, dispatch, operators]);
 
-  // FIXED: Only fetch prices when we're at confirm step AND we need them
+  // Only fetch prices when user is ready to purchase
   useEffect(() => {
-    if (selectedCountry && selectedService && step === 'confirm' && !prices[selectedCountry]?.[selectedService]) {
-      console.log('💲 Fetching prices for confirmation:', { country: selectedCountry, service: selectedService });
-      dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
+    if (selectedCountry && selectedService && selectedOperator !== null && step === 'confirm') {
+      if (!prices[selectedCountry]?.[selectedService]) {
+        console.log('💲 Fetching prices for purchase confirmation:', { country: selectedCountry, service: selectedService });
+        
+        const timer = setTimeout(() => {
+          dispatch(fetchPrices({ country: selectedCountry, service: selectedService }))
+            .catch((error: any) => {
+              if (error.message?.includes('rate limit') || error.message?.includes('429')) {
+                setRateLimitInfo({
+                  active: true,
+                  message: "Provider rate limit reached. Please wait before refreshing prices.",
+                  countdown: 30
+                });
+              }
+            });
+        }, 300);
+        
+        return () => clearTimeout(timer);
+      }
     }
-  }, [selectedCountry, selectedService, step, dispatch, prices]);
+  }, [selectedCountry, selectedService, selectedOperator, step, dispatch, prices]);
 
   // Handle step progression
   useEffect(() => {
@@ -93,18 +162,27 @@ const BuyNumber: React.FC = () => {
     dispatch(setSelectedCountry(countryCode));
     dispatch(setSelectedService(null));
     dispatch(setSelectedOperator(null));
+    if (numbersError) {
+      dispatch(clearError());
+    }
   };
 
   const handleServiceSelect = (serviceCode: string) => {
     dispatch(setSelectedService(serviceCode));
     dispatch(setSelectedOperator(null));
+    if (numbersError) {
+      dispatch(clearError());
+    }
   };
 
   const handleOperatorSelect = (operatorId: string) => {
     dispatch(setSelectedOperator(operatorId));
+    if (numbersError) {
+      dispatch(clearError());
+    }
   };
 
-  // REPLACE the handlePurchase function in BuyNumber.tsx:
+  // Enhanced purchase with rate limit handling
   const handlePurchase = async () => {
     if (!selectedService || !selectedCountry) {
       toast.error('Please select a service and country');
@@ -117,7 +195,6 @@ const BuyNumber: React.FC = () => {
       return;
     }
 
-    // Check real-time balance before purchase
     if (!canAfford()) {
       toast.error('Insufficient balance. Please top up your account.');
       return;
@@ -135,15 +212,13 @@ const BuyNumber: React.FC = () => {
 
       await dispatch(purchaseNumber(purchaseData)).unwrap();
 
-      toast.success('Number purchased successfully!', {
+      toast.success('Number purchased successfully! Check Active Numbers page.', {
         icon: '🎉',
-        duration: 5000
+        duration: 4000
       });
 
-      // Refresh balance after successful purchase
       payment.refreshBalance();
 
-      // Reset selections
       dispatch(setSelectedCountry(null));
       dispatch(setSelectedService(null));
       dispatch(setSelectedOperator(null));
@@ -155,7 +230,15 @@ const BuyNumber: React.FC = () => {
     } catch (error: any) {
       console.error('❌ Purchase failed:', error);
 
-      // Handle specific error cases with helpful messages
+      if (error.includes('rate limit') || error.includes('429')) {
+        setRateLimitInfo({
+          active: true,
+          message: "Our provider is getting the best number for you. Please try again in:",
+          countdown: 30000
+        });
+        return;
+      }
+
       if (error.includes('No numbers available')) {
         if (selectedOperator && selectedOperator !== '') {
           toast.error(
@@ -165,7 +248,6 @@ const BuyNumber: React.FC = () => {
               icon: '⚠️'
             }
           );
-          // Auto-reset to "Any Operator"
           dispatch(setSelectedOperator(''));
         } else {
           toast.error('No numbers currently available for this service/country combination.');
@@ -178,7 +260,6 @@ const BuyNumber: React.FC = () => {
         toast.error(error || 'Failed to purchase number. Please try again.');
       }
 
-      // Refresh balance in case of error too
       payment.refreshBalance();
     }
   };
@@ -201,7 +282,6 @@ const BuyNumber: React.FC = () => {
       realPrice = Number(servicePrices.realPrice || servicePrices.cost || 0);
     }
 
-    // BONUS SYSTEM: Return total price (real + 100% bonus)
     return realPrice * 2; // User pays double the real price
   };
 
@@ -216,20 +296,33 @@ const BuyNumber: React.FC = () => {
     dispatch(setSelectedCountry(null));
     dispatch(setSelectedService(null));
     dispatch(setSelectedOperator(null));
+    dispatch(clearError());
     setStep('country');
     setMaxPrice(null);
+    setRateLimitInfo(null);
   };
 
   const refreshData = () => {
     dispatch(fetchServices());
     dispatch(fetchCountries());
-    payment.refreshBalance(); // Also refresh payment balance
+    payment.refreshBalance();
     if (selectedCountry) {
       dispatch(fetchOperators(selectedCountry));
     }
     if (selectedCountry && selectedService) {
-      dispatch(fetchPrices({ country: selectedCountry, service: selectedService }));
+      dispatch(fetchPrices({ country: selectedCountry, service: selectedService }))
+        .catch((error: any) => {
+          if (error.message?.includes('rate limit') || error.message?.includes('429')) {
+            setRateLimitInfo({
+              active: true,
+              message: "Provider rate limit reached. Please wait before refreshing prices.",
+              countdown: 30
+            });
+          }
+        });
     }
+    dispatch(clearError());
+    setRateLimitInfo(null);
   };
 
   const getCurrentOperators = () => {
@@ -249,9 +342,11 @@ const BuyNumber: React.FC = () => {
       dispatch(setSelectedCountry(null));
       setStep('country');
     }
+    if (numbersError) {
+      dispatch(clearError());
+    }
   };
 
-  // Get current step info for mobile header
   const getStepInfo = () => {
     const steps = [
       { key: 'country', title: 'Select Country', number: 1 },
@@ -275,7 +370,6 @@ const BuyNumber: React.FC = () => {
     };
   };
 
-  // Get current balance with proper fallback
   const currentBalance = payment.balance?.balance ?? 0;
 
   // Loading state for initial data
@@ -318,7 +412,19 @@ const BuyNumber: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 lg:bg-transparent">
-      {/* Mobile Header with Balance Indicator */}
+      {/* Rate Limit Warning - Top Priority */}
+      {rateLimitInfo?.active && (
+        <div className="sticky top-0 z-50 bg-amber-500 text-white p-3 text-center">
+          <div className="flex items-center justify-center space-x-2">
+            <Clock className="h-4 w-4" />
+            <span className="font-medium">
+              {rateLimitInfo.message} {rateLimitInfo.countdown}s
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Header */}
       <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
@@ -342,7 +448,6 @@ const BuyNumber: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-2">
-              {/* Balance indicator */}
               <div className="text-xs text-gray-600 flex items-center">
                 {payment.loading.balance && (
                   <div className="w-2 h-2 border border-gray-400 border-t-blue-500 rounded-full animate-spin mr-1"></div>
@@ -351,7 +456,7 @@ const BuyNumber: React.FC = () => {
               </div>
               <button
                 onClick={refreshData}
-                disabled={loading || payment.loading.balance}
+                disabled={loading || payment.loading.balance || rateLimitInfo?.active}
                 className="p-2 text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors"
               >
                 <RefreshCw className={`h-5 w-5 ${(loading || payment.loading.balance) ? 'animate-spin' : ''}`} />
@@ -386,7 +491,7 @@ const BuyNumber: React.FC = () => {
             </div>
           </div>
 
-          {/* Mobile Selection Summary - Collapsible */}
+          {/* Mobile Selection Summary */}
           {(selectedCountry || selectedService) && (
             <div className="mt-3 pt-3 border-t border-gray-100">
               <button
@@ -434,7 +539,7 @@ const BuyNumber: React.FC = () => {
         </div>
       </div>
 
-      {/* Desktop Header - Hidden on mobile with Balance Display */}
+      {/* Desktop Header */}
       <div className="hidden lg:block">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
@@ -443,7 +548,6 @@ const BuyNumber: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Balance display */}
             <div className="bg-primary-50 px-4 py-2 rounded-lg flex items-center">
               <span className="text-sm text-primary-600 font-medium">
                 Balance: ${currentBalance.toFixed(4)}
@@ -465,7 +569,7 @@ const BuyNumber: React.FC = () => {
 
               <button
                 onClick={refreshData}
-                disabled={loading || payment.loading.balance}
+                disabled={loading || payment.loading.balance || rateLimitInfo?.active}
                 className="flex items-center justify-center space-x-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${(loading || payment.loading.balance) ? 'animate-spin' : ''}`} />
@@ -507,17 +611,7 @@ const BuyNumber: React.FC = () => {
         </div>
       </div>
 
-      {/* Real-time Balance Update Notification */}
-      {/* {payment.loading.balance && (
-        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <div className="flex items-center">
-            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-            <span className="text-sm text-blue-800">Updating balance...</span>
-          </div>
-        </div>
-      )} */}
-
-      {/* Content Container - Responsive */}
+      {/* Content Container */}
       <div className="lg:bg-white lg:rounded-lg lg:shadow-sm lg:border lg:border-gray-200">
         {step === 'country' && (
           <CountrySelector
@@ -554,7 +648,7 @@ const BuyNumber: React.FC = () => {
           <div className="p-4 lg:p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4 lg:mb-6">Confirm Purchase</h3>
 
-            {/* Selection Summary - Mobile Optimized */}
+            {/* Selection Summary */}
             <div className="bg-gray-50 rounded-lg p-4 lg:p-6 mb-4 lg:mb-6">
               <div className="space-y-3 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-4">
                 <div>
@@ -579,7 +673,7 @@ const BuyNumber: React.FC = () => {
                 )}
               </div>
 
-              {/* Max Price Setting - Mobile Optimized */}
+              {/* Max Price Setting */}
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <label className="block text-xs lg:text-sm font-medium text-gray-700 mb-2">
                   Maximum Price (Optional)
@@ -599,18 +693,17 @@ const BuyNumber: React.FC = () => {
               </div>
             </div>
 
-            {/* Enhanced Price Display with real-time balance */}
+            {/* Price Display */}
             <PriceDisplay
               price={getCurrentPrice()}
               balance={currentBalance}
               canAfford={canAfford()}
-              loading={pricesLoading}
+              loading={pricesLoading || rateLimitInfo?.active}
               balanceLoading={payment.loading.balance}
             />
 
-
-            {/* Error Display - Add this before the purchase button */}
-            {numbersError && clearError &&  (
+            {/* Error Display */}
+            {numbersError && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-start space-x-3">
                   <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
@@ -628,21 +721,33 @@ const BuyNumber: React.FC = () => {
                         Try "Any Operator" instead
                       </button>
                     )}
+                    <button
+                      onClick={() => dispatch(clearError())}
+                      className="ml-4 mt-2 text-sm font-medium text-red-600 hover:text-red-700"
+                    >
+                      Dismiss
+                    </button>
                   </div>
                 </div>
               </div>
             )}
-            {/* Action Buttons - Mobile Optimized with enhanced checks */}
+
+            {/* Action Buttons */}
             <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 mt-6">
               <button
                 onClick={handlePurchase}
-                disabled={purchasing || !canAfford() || pricesLoading || payment.loading.balance}
-                className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${purchasing || !canAfford() || pricesLoading || payment.loading.balance
+                disabled={purchasing || !canAfford() || pricesLoading || payment.loading.balance || rateLimitInfo?.active}
+                className={`flex-1 py-3 px-4 rounded-md font-medium transition-colors text-center ${purchasing || !canAfford() || pricesLoading || payment.loading.balance || rateLimitInfo?.active
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-primary-600 text-white hover:bg-primary-700'
                   }`}
               >
-                {purchasing ? (
+                {rateLimitInfo?.active ? (
+                  <span className="flex items-center justify-center">
+                    <Clock className="h-4 w-4 mr-2" />
+                    <span>Wait {rateLimitInfo.countdown}s</span>
+                  </span>
+                ) : purchasing ? (
                   <span className="flex items-center justify-center">
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Purchasing...</span>
@@ -665,13 +770,13 @@ const BuyNumber: React.FC = () => {
               <button
                 onClick={goBack}
                 className="lg:flex-none px-6 py-3 text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-center"
-                disabled={purchasing}
+                disabled={purchasing || rateLimitInfo?.active}
               >
                 Back
               </button>
             </div>
 
-            {/* Enhanced Affordability Warning - Mobile Optimized */}
+            {/* Affordability Warning */}
             {!canAfford() && getCurrentPrice() && (
               <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-start space-x-3">
