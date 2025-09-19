@@ -1,4 +1,4 @@
-// services/smsActivateServices.js - FIXED: Rate limiting and request queue
+// services/smsActivateServices.js - ENHANCED: Better rate limit responses
 const axios = require('axios');
 const logger = require('../utils/logger');
 const cacheService = require('./cacheServices');
@@ -8,16 +8,16 @@ class SmsActivateService {
     this.apiUrl = process.env.SMS_ACTIVATE_API_URL || 'https://api.sms-activate.ae/stubs/handler_api.php';
     this.apiKey = process.env.SMS_ACTIVATE_API_KEY;
 
-    // ADDED: Rate limiting controls
-    this.readQueue = [];    // for non-mutating ops like getBalance/getPrices/getServices
-    this.writeQueue = [];   // for mutating ops like getNumber/setStatus
-    this.readConcurrency = 5;      // allow some parallelism for reads
-    this.writeConcurrency = 1;     // serialize writes
+    // Rate limiting controls
+    this.readQueue = [];    
+    this.writeQueue = [];   
+    this.readConcurrency = 3;      // REDUCED from 5 to 3
+    this.writeConcurrency = 1;     
     this.currentRead = 0;
     this.currentWrite = 0;
-    this.minRequestDelayRead = 200;   // 0.2s → 5 requests/sec
-    this.minRequestDelayWrite = 1000; // 1s → smoother cancels/activations
-    this.backoff = { multiplier: 1, maxMultiplier: 6 }; // exponential backoff control
+    this.minRequestDelayRead = 500;   // INCREASED from 200ms to 500ms
+    this.minRequestDelayWrite = 2000; // INCREASED from 1000ms to 2000ms
+    this.backoff = { multiplier: 1, maxMultiplier: 8 }; // INCREASED max multiplier
     this.consecutive429s = 0;
     this.globalRateLimitReset = null;
 
@@ -50,7 +50,7 @@ class SmsActivateService {
       CANCEL_ACTIVATION: 8
     };
 
-    logger.info('SMS-Activate Service initialized with rate limiting');
+    logger.info('SMS-Activate Service initialized with enhanced rate limiting');
   }
 
   async queueRequest(action, params = {}, options = { type: 'read' }) {
@@ -66,16 +66,13 @@ class SmsActivateService {
     });
   }
 
-  // Helper to compute delay depending on type and backoff
   _computeDelay(type) {
     const base = type === 'write' ? this.minRequestDelayWrite : this.minRequestDelayRead;
-    // scale by backoff multiplier (exponential on consecutive 429s), with jitter
     const mult = Math.min(this.backoff.multiplier, this.backoff.maxMultiplier);
-    const jitter = Math.floor(Math.random() * 250);
+    const jitter = Math.floor(Math.random() * 500); // INCREASED jitter
     return base * mult + jitter;
   }
 
-  // Process reads (concurrent)
   async processReadQueue() {
     if (this.globalRateLimitReset && Date.now() < this.globalRateLimitReset) return;
     while (this.readQueue.length > 0 && this.currentRead < this.readConcurrency) {
@@ -83,34 +80,34 @@ class SmsActivateService {
       this.currentRead++;
       (async () => {
         try {
-          // throttle per-request if needed
-          const since = Date.now() - this.lastRequestTime;
+          const since = Date.now() - (this.lastRequestTime || 0);
           const delayNeeded = this.minRequestDelayRead - since;
           if (delayNeeded > 0) await this.sleep(delayNeeded);
 
           const res = await this.makeDirectRequest(entry.action, entry.params);
-          // success: reset 429 counters/backoff
           this.consecutive429s = Math.max(0, this.consecutive429s - 1);
           this.backoff.multiplier = Math.max(1, this.backoff.multiplier - 0.5);
 
           entry.resolve(res);
         } catch (err) {
-          // handle 429 specially
           if (err.response?.status === 429) {
             this.consecutive429s++;
-            // honor Retry-After header if present
             const ra = err.response?.headers?.['retry-after'];
-            let cooldownMs = 30000;
+            let cooldownMs = 45000; // INCREASED default cooldown
             if (ra) {
               const raSec = parseInt(ra, 10);
               if (!Number.isNaN(raSec)) cooldownMs = raSec * 1000;
             } else {
-              this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 2);
-              cooldownMs = Math.min(60000, this._computeDelay('read') * 10);
+              this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 2.5); // INCREASED multiplier
+              cooldownMs = Math.min(120000, this._computeDelay('read') * 15); // INCREASED multiplier
             }
             this.globalRateLimitReset = Date.now() + cooldownMs;
-            // put this request back into the front of the read queue to retry later
-            this.readQueue.unshift(entry);
+            
+            // ENHANCED: Better rate limit error message
+            const enhancedError = new Error(`Rate limit exceeded. Our provider is processing high traffic. Please wait ${Math.ceil(cooldownMs/1000)} seconds and try again.`);
+            enhancedError.code = 'RATE_LIMIT_EXCEEDED';
+            enhancedError.retryAfter = Math.ceil(cooldownMs/1000);
+            entry.reject(enhancedError);
           } else {
             entry.reject(err);
           }
@@ -122,7 +119,6 @@ class SmsActivateService {
     }
   }
 
-  // Process writes (single concurrency)
   async processWriteQueue() {
     if (this.globalRateLimitReset && Date.now() < this.globalRateLimitReset) return;
     if (this.currentWrite > 0) return;
@@ -132,12 +128,11 @@ class SmsActivateService {
     this.currentWrite = 1;
 
     try {
-      const since = Date.now() - this.lastRequestTime;
+      const since = Date.now() - (this.lastRequestTime || 0);
       const delayNeeded = this.minRequestDelayWrite - since;
       if (delayNeeded > 0) await this.sleep(delayNeeded);
 
       const res = await this.makeDirectRequest(entry.action, entry.params);
-      // success: reset 429 counters/backoff
       this.consecutive429s = Math.max(0, this.consecutive429s - 1);
       this.backoff.multiplier = 1;
 
@@ -145,36 +140,35 @@ class SmsActivateService {
     } catch (err) {
       if (err.response?.status === 429) {
         this.consecutive429s++;
-        // Retry-After header preferred
         const ra = err.response?.headers?.['retry-after'];
-        let cooldownMs = 2000; // quick retry 2s later
+        let cooldownMs = 30000; // INCREASED default
         if (ra) {
           const raSec = parseInt(ra, 10);
           if (!Number.isNaN(raSec)) cooldownMs = raSec * 1000;
         } else {
-          // exponential backoff w/jitter
-          this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 2);
-          cooldownMs = Math.min(120000, this.minRequestDelayWrite * this.backoff.multiplier + Math.floor(Math.random() * 5000));
+          this.backoff.multiplier = Math.min(this.backoff.maxMultiplier, this.backoff.multiplier * 3); // INCREASED
+          cooldownMs = Math.min(180000, this.minRequestDelayWrite * this.backoff.multiplier + Math.floor(Math.random() * 10000)); // INCREASED
         }
         this.globalRateLimitReset = Date.now() + cooldownMs;
-        // requeue to front
-        this.writeQueue.unshift(entry);
+        
+        // ENHANCED: Better rate limit error for purchases
+        const enhancedError = new Error(`Our provider is getting the best number for you. Please try again in ${Math.ceil(cooldownMs/1000)} seconds.`);
+        enhancedError.code = 'RATE_LIMIT_EXCEEDED';
+        enhancedError.retryAfter = Math.ceil(cooldownMs/1000);
+        entry.reject(enhancedError);
       } else {
         entry.reject(err);
       }
     } finally {
       this.currentWrite = 0;
       this.lastRequestTime = Date.now();
-      // kick both queues after finishing a write because write may affect available resources
       setImmediate(() => {
         this.processReadQueue();
         this.processWriteQueue();
       });
     }
-
   }
 
-  // Convenience wrapper: still keep makeRequest signature; optional options param allowed.
   async makeRequest(action, params = {}, options = { type: 'read' }) {
     return this.queueRequest(action, params, options);
   }
@@ -183,7 +177,6 @@ class SmsActivateService {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Direct request method (used by queue processor)
   async makeDirectRequest(action, params = {}) {
     try {
       const providerAction = (this.actionMap && this.actionMap[action]) ? this.actionMap[action] : action;
@@ -195,12 +188,12 @@ class SmsActivateService {
       };
 
       logger.info(`📡 SMS-Activate API Request - Action: ${action}`, {
-        params: { ...requestParams, api_key: '***HIDDEN***' } // Hide API key in logs
+        params: { ...requestParams, api_key: '***HIDDEN***' }
       });
 
       const response = await axios.get(this.apiUrl, {
         params: requestParams,
-        timeout: 45000, // Increased timeout
+        timeout: 60000, // INCREASED timeout
         headers: {
           'User-Agent': 'SMS-Dashboard-Service/1.0',
           'Accept': 'application/json, text/plain, */*',
@@ -277,7 +270,11 @@ class SmsActivateService {
     } else if (error.code === 'ETIMEDOUT') {
       return new Error('Request timeout - SMS-Activate API too slow');
     } else if (error.response?.status === 429) {
-      return new Error('Rate limit exceeded - too many API requests');
+      // ENHANCED: Better rate limit error message
+      const enhancedError = new Error('Rate limit exceeded. Our provider is experiencing high traffic. Please wait 30 seconds and try again.');
+      enhancedError.code = 'RATE_LIMIT_EXCEEDED';
+      enhancedError.retryAfter = 30;
+      return enhancedError;
     }
     return error;
   }
@@ -296,7 +293,7 @@ class SmsActivateService {
 
       if (typeof response === 'string' && response.includes(':')) {
         const balance = parseFloat(response.split(':')[1]);
-        await cacheService.set(cacheKey, balance, 600); // Cache for 10 minutes
+        await cacheService.set(cacheKey, balance, 900); // INCREASED cache time to 15 minutes
         return balance;
       }
 
@@ -329,7 +326,7 @@ class SmsActivateService {
       }
 
       const processedServices = this.processServicesData(services);
-      await cacheService.cacheServices(processedServices);
+      await cacheService.cacheServices(processedServices, 7200); // INCREASED cache time to 2 hours
 
       return processedServices;
     } catch (error) {
@@ -402,7 +399,7 @@ class SmsActivateService {
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      await cacheService.cacheCountries(processedCountries);
+      await cacheService.cacheCountries(processedCountries, 7200); // INCREASED cache time to 2 hours
       return processedCountries;
     } catch (error) {
       logger.error('❌ Get countries error:', error);
@@ -421,10 +418,8 @@ class SmsActivateService {
 
       const response = await this.makeRequest('getOperators', { country });
 
-      // Handle SMS-Activate response format
       let processedResponse;
       if (typeof response === 'object' && response.status === 'success') {
-        // Return the full response for route to handle
         processedResponse = response;
       } else if (typeof response === 'string') {
         try {
@@ -437,15 +432,15 @@ class SmsActivateService {
         processedResponse = response;
       }
 
-      await cacheService.set(cacheKey, processedResponse, 3600); // Cache for 1 hour
+      await cacheService.set(cacheKey, processedResponse, 7200); // INCREASED cache time to 2 hours
       return processedResponse;
     } catch (error) {
       logger.error('❌ Get operators error:', error);
-      // Return empty response instead of throwing
       return { status: 'success', countryOperators: {} };
     }
   }
-  // ENHANCED: Better price extraction with freePriceMap handling
+
+  // ENHANCED: Better price extraction with longer cache
   async getPrices(country = null, service = null, operator = null) {
     try {
       const cacheKey = `sms:prices:${country || 'all'}:${service || 'all'}:${operator || 'all'}`;
@@ -472,10 +467,9 @@ class SmsActivateService {
         prices = response;
       }
 
-      // ENHANCED: Process prices to extract real prices from freePriceMap
       const processedPrices = this.processPricesWithFreePriceMap(prices);
 
-    await cacheService.set(cacheKey, processedPrices, 60); // 1 min
+      await cacheService.set(cacheKey, processedPrices, 300); // Keep 5 minutes for prices as they change frequently
       return processedPrices;
     } catch (error) {
       logger.error('❌ Get prices error:', error);
@@ -483,7 +477,6 @@ class SmsActivateService {
     }
   }
 
-  // ADDED: Process prices with freePriceMap extraction
   processPricesWithFreePriceMap(prices) {
     if (!prices || typeof prices !== 'object') return {};
 
@@ -498,27 +491,22 @@ class SmsActivateService {
             let realPrice = 0;
             let availableCount = parseInt(serviceData.count || 0);
 
-            // CRITICAL: Extract real price from freePriceMap - use LOWEST price as default
             if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
               const actualPrices = Object.keys(serviceData.freePriceMap).map(p => parseFloat(p));
-
-              // Sort prices ascending and get the lowest (cheapest) price as default
               actualPrices.sort((a, b) => a - b);
-              realPrice = actualPrices[0]; // Use the cheapest price as default
+              realPrice = actualPrices[0];
 
-              // Get count for the cheapest price
               const cheapestPriceStr = realPrice.toFixed(4);
               const priceMapCount = parseInt(serviceData.freePriceMap[cheapestPriceStr] || 0);
               if (priceMapCount > 0) {
                 availableCount = priceMapCount;
               }
             } else {
-              // Fallback to cost field if freePriceMap is not available
               realPrice = parseFloat(serviceData.cost || 0);
             }
 
             processed[countryCode][serviceCode] = {
-              cost: realPrice, // Store the REAL price here
+              cost: realPrice,
               realPrice: realPrice,
               misleadingCost: parseFloat(serviceData.cost || 0),
               count: availableCount,
@@ -547,17 +535,13 @@ class SmsActivateService {
       }
 
       const response = await this.makeRequest('getNumbersStatus', params);
-
-      // Cache the response for 5 minutes
-      await cacheService.set(cacheKey, response, 300);
+      await cacheService.set(cacheKey, response, 600); // Cache for 10 minutes
       return response;
     } catch (error) {
       logger.error('❌ Get numbers status error:', error);
       throw error;
     }
   }
-
-  // ... (rest of the methods remain the same)
 
   async getNumber(service, country = null, operator = null, maxPrice = null) {
     const params = { service };
@@ -566,7 +550,7 @@ class SmsActivateService {
 
     try {
       logger.info('📱 Purchasing number:', params);
-      const response = await this.makeRequest('getNumber', params);
+      const response = await this.makeRequest('getNumber', params, { type: 'write' }); // FIXED: Mark as write operation
 
       if (typeof response === 'string') {
         const parts = response.split(':');
@@ -596,7 +580,7 @@ class SmsActivateService {
 
     try {
       logger.info('⚙️ Setting status:', params);
-      const response = await this.makeRequest('setStatus', params);
+      const response = await this.makeRequest('setStatus', params, { type: 'write' }); // FIXED: Mark as write operation
 
       if (typeof response === 'string' && response === 'ACCESS_READY') {
         return { success: true, message: 'Status updated successfully' };
@@ -668,18 +652,18 @@ class SmsActivateService {
       response === 'WRONG_DOMAIN';
   }
 
-  // ADDED: Get queue status for debugging
   getQueueStatus() {
-  return {
-    readQueue: this.readQueue.length,
-    writeQueue: this.writeQueue.length,
-    activeReads: this.currentRead,
-    activeWrites: this.currentWrite,
-    rateLimitActive: this.globalRateLimitReset && Date.now() < this.globalRateLimitReset,
-    rateLimitResetTime: this.globalRateLimitReset
-  };
-}
-
+    return {
+      readQueue: this.readQueue.length,
+      writeQueue: this.writeQueue.length,
+      activeReads: this.currentRead,
+      activeWrites: this.currentWrite,
+      rateLimitActive: this.globalRateLimitReset && Date.now() < this.globalRateLimitReset,
+      rateLimitResetTime: this.globalRateLimitReset,
+      consecutive429s: this.consecutive429s,
+      backoffMultiplier: this.backoff.multiplier
+    };
+  }
 }
 
 module.exports = new SmsActivateService();
