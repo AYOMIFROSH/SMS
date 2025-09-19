@@ -95,7 +95,7 @@ const BuyNumber: React.FC = () => {
             countdown: prev.countdown - 1
           };
         });
-      }, 10000);
+      }, 25000);
 
       return () => clearInterval(timer);
     }
