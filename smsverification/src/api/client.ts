@@ -3,6 +3,7 @@ import axios, { AxiosError } from 'axios';
 import { ApiError } from '@/types';
 import type { AxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
+import { toastWarning } from '@/utils/toastHelpers';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -284,8 +285,8 @@ client.interceptors.response.use(
           }
           break;
         case 429:
-          const retryAfter = error.response.headers['retry-after'] || '60';
-          toast.error(`Rate limited. Wait ${retryAfter}s`, { duration: 5000 });
+          const retryAfter = error.response.headers['retry-after'] || 'and try again later';
+          toastWarning(`Rate limited. Wait ${retryAfter}`);
           break;
         case 500:
           if (!originalRequest?.url?.includes('/health')) {

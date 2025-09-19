@@ -76,7 +76,7 @@ const BuyNumber: React.FC = () => {
     if (numbersError && (selectedCountry || selectedService || selectedOperator)) {
       const timer = setTimeout(() => {
         dispatch(clearError());
-      }, 2000);
+      }, 30000);
       
       return () => clearTimeout(timer);
     }
@@ -312,7 +312,7 @@ const BuyNumber: React.FC = () => {
     if (selectedCountry && selectedService) {
       dispatch(fetchPrices({ country: selectedCountry, service: selectedService }))
         .catch((error: any) => {
-          if (error.message?.includes('rate limit') || error.message?.includes('429')) {
+          if (error.message?.includes('Rate limit exceeded') || error.message?.includes('429')) {
             setRateLimitInfo({
               active: true,
               message: "Provider rate limit reached. Please wait before refreshing prices.",
