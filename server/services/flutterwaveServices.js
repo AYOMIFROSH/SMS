@@ -81,12 +81,12 @@ class FlutterwaveService {
     }
 
     // Validate key formats
-    if (!this.publicKey.startsWith('FLWPUBK_')) {
-      throw new Error('Invalid FLW_PUBLIC_KEY format. Should start with FLWPUBK_');
+    if (!this.publicKey.startsWith('FLWPUBK-')) {
+      throw new Error('Invalid FLW_PUBLIC_KEY format. Should start with FLWPUBK-');
     }
 
-    if (!this.secretKey.startsWith('FLWSECK_')) {
-      throw new Error('Invalid FLW_SECRET_KEY format. Should start with FLWSECK_');
+    if (!this.secretKey.startsWith('FLWSECK-')) {
+      throw new Error('Invalid FLW_SECRET_KEY format. Should start with FLWSECK-');
     }
 
     logger.info('✅ Flutterwave configuration validated');
@@ -264,95 +264,95 @@ class FlutterwaveService {
     }
   }
 
-async verifyTransaction(txId, source = 'manual') {
-  try {
-    logger.info('Verifying Flutterwave transaction:', { txId, source });
+  async verifyTransaction(txId, source = 'manual') {
+    try {
+      logger.info('Verifying Flutterwave transaction:', { txId, source });
 
-    // If txId looks like our tx_ref format, try to resolve it to flw_tx_id
-    if (txId.startsWith('SMS_')) {
-      const pool = getPool();
-      const [deposits] = await pool.execute(
-        'SELECT flw_tx_id, tx_ref, status FROM payment_deposits WHERE tx_ref = ?',
-        [txId]
-      );
+      // If txId looks like our tx_ref format, try to resolve it to flw_tx_id
+      if (txId.startsWith('SMS_')) {
+        const pool = getPool();
+        const [deposits] = await pool.execute(
+          'SELECT flw_tx_id, tx_ref, status FROM payment_deposits WHERE tx_ref = ?',
+          [txId]
+        );
 
-      if (deposits.length === 0) {
-        logger.warn('Deposit not found for tx_ref:', txId);
-        return { success: false, error: 'Payment not found in our records' };
-      }
-
-      const deposit = deposits[0];
-
-      if (!deposit.flw_tx_id) {
-        // 🔄 fallback: query Flutterwave by tx_ref
-        logger.warn('No Flutterwave transaction ID in DB, fetching by tx_ref:', txId);
-        const resp = await this.client.get(`/transactions?tx_ref=${txId}`);
-
-        if (resp.data?.status === 'success' && resp.data?.data?.length > 0) {
-          const tx = resp.data.data[0];
-
-          // Update DB with flw_tx_id and flw_ref
-          await pool.execute(
-            'UPDATE payment_deposits SET flw_tx_id = ?, flw_ref = ? WHERE tx_ref = ?',
-            [tx.id, tx.flw_ref, txId]
-          );
-
-          logger.info('Backfilled flw_tx_id for deposit:', {
-            txRef: txId,
-            flwTxId: tx.id,
-            flwRef: tx.flw_ref
-          });
-
-          txId = tx.id; // continue with Flutterwave verify below
-        } else {
-          return { success: false, error: 'Transaction not found on Flutterwave by tx_ref' };
+        if (deposits.length === 0) {
+          logger.warn('Deposit not found for tx_ref:', txId);
+          return { success: false, error: 'Payment not found in our records' };
         }
-      } else {
-        // Use the stored flw_tx_id
-        txId = deposit.flw_tx_id;
-        logger.info('Using Flutterwave transaction ID for verification:', {
-          originalTxRef: deposit.tx_ref,
-          flwTxId: txId
-        });
+
+        const deposit = deposits[0];
+
+        if (!deposit.flw_tx_id) {
+          // 🔄 fallback: query Flutterwave by tx_ref
+          logger.warn('No Flutterwave transaction ID in DB, fetching by tx_ref:', txId);
+          const resp = await this.client.get(`/transactions?tx_ref=${txId}`);
+
+          if (resp.data?.status === 'success' && resp.data?.data?.length > 0) {
+            const tx = resp.data.data[0];
+
+            // Update DB with flw_tx_id and flw_ref
+            await pool.execute(
+              'UPDATE payment_deposits SET flw_tx_id = ?, flw_ref = ? WHERE tx_ref = ?',
+              [tx.id, tx.flw_ref, txId]
+            );
+
+            logger.info('Backfilled flw_tx_id for deposit:', {
+              txRef: txId,
+              flwTxId: tx.id,
+              flwRef: tx.flw_ref
+            });
+
+            txId = tx.id; // continue with Flutterwave verify below
+          } else {
+            return { success: false, error: 'Transaction not found on Flutterwave by tx_ref' };
+          }
+        } else {
+          // Use the stored flw_tx_id
+          txId = deposit.flw_tx_id;
+          logger.info('Using Flutterwave transaction ID for verification:', {
+            originalTxRef: deposit.tx_ref,
+            flwTxId: txId
+          });
+        }
       }
-    }
 
-    // ✅ Now verify using flw_tx_id
-    const response = await this.client.get(`/transactions/${txId}/verify`);
+      // ✅ Now verify using flw_tx_id
+      const response = await this.client.get(`/transactions/${txId}/verify`);
 
-    if (response.data?.status === 'success') {
-      const transaction = response.data.data;
+      if (response.data?.status === 'success') {
+        const transaction = response.data.data;
 
-      logger.info('Transaction verification response:', {
-        txId: transaction.id,
-        txRef: transaction.tx_ref,
-        status: transaction.status,
-        amount: transaction.amount,
-        currency: transaction.currency
+        logger.info('Transaction verification response:', {
+          txId: transaction.id,
+          txRef: transaction.tx_ref,
+          status: transaction.status,
+          amount: transaction.amount,
+          currency: transaction.currency
+        });
+
+        return { success: true, data: transaction };
+      } else {
+        logger.warn('Transaction verification failed:', response.data);
+        return {
+          success: false,
+          error: response.data?.message || 'Transaction verification failed'
+        };
+      }
+
+    } catch (error) {
+      logger.error('Transaction verification error:', {
+        txId,
+        error: error.message,
+        response: error.response?.data
       });
 
-      return { success: true, data: transaction };
-    } else {
-      logger.warn('Transaction verification failed:', response.data);
       return {
         success: false,
-        error: response.data?.message || 'Transaction verification failed'
+        error: error.response?.data?.message || error.message || 'Verification failed'
       };
     }
-
-  } catch (error) {
-    logger.error('Transaction verification error:', {
-      txId,
-      error: error.message,
-      response: error.response?.data
-    });
-
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message || 'Verification failed'
-    };
   }
-}
 
 
   // Process successful payment
