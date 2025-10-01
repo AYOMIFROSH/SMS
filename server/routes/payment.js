@@ -772,22 +772,63 @@ router.post('/refresh-checkout/:txRef', async (req, res) => {
     const { txRef } = req.params;
     const pool = getPool();
 
-    // Lookup the deposit
+    logger.info('Flutterwave refresh-checkout called:', { txRef });
+
+    // Get the original deposit
     const [deposits] = await pool.execute(
-      'SELECT id, user_id, ngn_amount, payment_type, customer_email, customer_name, customer_phone FROM payment_deposits WHERE tx_ref = ?',
+      `SELECT id, user_id, ngn_amount, usd_equivalent, fx_rate, payment_type, 
+              customer_email, customer_name, customer_phone, status, expires_at 
+       FROM payment_deposits 
+       WHERE tx_ref = ?`,
       [txRef]
     );
 
     if (deposits.length === 0) {
+      logger.warn('Refresh checkout: transaction not found', { txRef });
       return res.status(404).json({
         status: 'error',
-        message: 'Transaction not found'
+        message: 'Transaction not found',
+        error: 'TRANSACTION_NOT_FOUND'
       });
     }
 
     const deposit = deposits[0];
 
-    // Create a new session (same user + amount)
+    // Check if transaction is still pending and not expired
+    if (deposit.status !== 'PENDING_UNSETTLED') {
+      logger.info('Refresh checkout: transaction not pending', { 
+        txRef, 
+        status: deposit.status 
+      });
+      return res.json({
+        status: 'error',
+        message: 'Transaction is no longer pending',
+        currentStatus: deposit.status
+      });
+    }
+
+    // Check expiration
+    const expiresAt = new Date(deposit.expires_at);
+    const now = new Date();
+    
+    if (now > expiresAt) {
+      logger.info('Refresh checkout: transaction expired', { txRef });
+      
+      // Mark as expired in database
+      await pool.execute(
+        'UPDATE payment_deposits SET status = ?, updated_at = NOW() WHERE tx_ref = ?',
+        ['CANCELLED', txRef]
+      );
+
+      return res.json({
+        status: 'error',
+        message: 'Transaction has expired',
+        error: 'TRANSACTION_EXPIRED'
+      });
+    }
+
+    // Generate a NEW payment session with SAME tx_ref
+    // This maintains transaction continuity
     const newSession = await flutterwaveService.createPaymentSession({
       userId: deposit.user_id,
       amount: deposit.ngn_amount,
@@ -795,26 +836,111 @@ router.post('/refresh-checkout/:txRef', async (req, res) => {
       customerEmail: deposit.customer_email,
       customerName: deposit.customer_name,
       customerPhone: deposit.customer_phone,
-      meta: { refresh_of: txRef }
+      // IMPORTANT: Reuse the same tx_ref for continuity
+      existingTxRef: txRef,
+      meta: { 
+        refresh_of: txRef,
+        refresh_timestamp: new Date().toISOString()
+      }
     });
 
+    // Update the payment_link in database
+    await pool.execute(
+      `UPDATE payment_deposits 
+       SET payment_link = ?, 
+           checkout_token = ?,
+           expires_at = ?,
+           updated_at = NOW()
+       WHERE tx_ref = ?`,
+      [
+        newSession.payment_link,
+        newSession.checkout_token || null,
+        newSession.expires_at,
+        txRef
+      ]
+    );
+
+    logger.info('Checkout refreshed successfully:', { 
+      txRef, 
+      newLink: newSession.payment_link.substring(0, 50) 
+    });
+
+    // Return the new payment link to Flutterwave
     res.json({
       status: 'success',
       message: 'Checkout refreshed',
       data: {
-        tx_ref: newSession.tx_ref,
+        tx_ref: txRef,
         payment_link: newSession.payment_link,
         expires_at: newSession.expires_at
       }
     });
+
   } catch (error) {
-    logger.error('Refresh checkout error:', { error: error.message });
+    logger.error('Refresh checkout error:', { 
+      error: error.message,
+      txRef: req.params.txRef 
+    });
+    
     res.status(500).json({
       status: 'error',
-      message: 'Failed to refresh checkout'
+      message: 'Failed to refresh checkout',
+      error: error.message
     });
   }
 });
 
+router.get('/checkout-status/:txRef',
+  rateLimiters.api,
+  authenticateToken,
+  verifyPaymentValidation,
+  handleValidationErrors,
+  async (req, res) => {
+    try {
+      const { txRef } = req.params;
+      const userId = req.user.id;
+      const pool = getPool();
+
+      const [deposits] = await pool.execute(
+        `SELECT tx_ref, status, payment_link, expires_at, created_at 
+         FROM payment_deposits 
+         WHERE tx_ref = ? AND user_id = ?`,
+        [txRef, userId]
+      );
+
+      if (deposits.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Transaction not found'
+        });
+      }
+
+      const deposit = deposits[0];
+      const now = new Date();
+      const expiresAt = new Date(deposit.expires_at);
+      const isExpired = now > expiresAt;
+
+      res.json({
+        success: true,
+        data: {
+          tx_ref: deposit.tx_ref,
+          status: deposit.status,
+          is_expired: isExpired,
+          is_valid: deposit.status === 'PENDING_UNSETTLED' && !isExpired,
+          payment_link: !isExpired ? deposit.payment_link : null,
+          expires_at: deposit.expires_at,
+          time_remaining_seconds: !isExpired ? Math.floor((expiresAt - now) / 1000) : 0
+        }
+      });
+
+    } catch (error) {
+      logger.error('Checkout status check error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to check checkout status'
+      });
+    }
+  }
+);
 
 module.exports = router;
