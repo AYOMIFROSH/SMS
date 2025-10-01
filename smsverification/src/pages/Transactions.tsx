@@ -238,7 +238,7 @@ export const Transactions: React.FC = () => {
                 className="flex-1 sm:flex-initial border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 touch-target"
                 placeholder="Start date"
               />
-              
+
               <input
                 type="date"
                 value={payment.filters.endDate || ''}
@@ -327,7 +327,7 @@ export const Transactions: React.FC = () => {
                             )}
                           </div>
                         </div>
-                        
+
                         {/* Transaction details - stacked on mobile */}
                         <div className="text-xs sm:text-sm text-gray-500 space-y-1">
                           <div className="truncate">Ref: {tx.tx_ref}</div>
@@ -362,38 +362,67 @@ export const Transactions: React.FC = () => {
                         <Eye className="w-3 h-3 mr-1" />
                         Details
                       </button>
+                          {/* // Add this to Transactions.tsx - Enhanced verify handling */}
 
+                      {/* // Inside the transaction map where verify button is shown: */}
                       {tx.status === 'PENDING_UNSETTLED' && (
                         <>
-                          <button
-                            onClick={() => payment.manualVerifyTransaction(tx.tx_ref)}
-                            disabled={isRetrying}
-                            className="flex items-center px-3 py-1.5 text-blue-600 hover:text-blue-700 text-xs sm:text-sm disabled:opacity-50 touch-target rounded hover:bg-blue-50"
-                          >
-                            {isRetrying ? (
-                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                            ) : (
-                              <RefreshCw className="w-3 h-3 mr-1" />
-                            )}
-                            Verify
-                          </button>
+                          {/* Check if expired first */}
+                          {(() => {
+                            const isExpired = tx.expires_at ? new Date() > new Date(tx.expires_at) : false;
 
-                          <button
-                            onClick={() => paymentAPI.openPaymentLink(tx.payment_link)}
-                            className="flex items-center px-3 py-1.5 text-green-600 hover:text-green-700 text-xs sm:text-sm touch-target rounded hover:bg-green-50"
-                          >
-                            <CreditCard className="w-3 h-3 mr-1" />
-                            <span className="hidden sm:inline">Reopen Checkout</span>
-                            <span className="sm:hidden">Reopen</span>
-                          </button>
+                            if (isExpired) {
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-red-600 flex items-center">
+                                    <Clock className="w-3 h-3 mr-1" />
+                                    Expired
+                                  </span>
+                                  <button
+                                    onClick={() => payment.cancelPayment(tx.tx_ref)}
+                                    className="flex items-center px-3 py-1.5 text-red-600 hover:text-red-700 text-xs sm:text-sm touch-target rounded hover:bg-red-50"
+                                  >
+                                    <XCircle className="w-3 h-3 mr-1" />
+                                    Remove
+                                  </button>
+                                </div>
+                              );
+                            }
 
-                          <button
-                            onClick={() => payment.cancelPayment(tx.tx_ref)}
-                            className="flex items-center px-3 py-1.5 text-red-600 hover:text-red-700 text-xs sm:text-sm touch-target rounded hover:bg-red-50"
-                          >
-                            <XCircle className="w-3 h-3 mr-1" />
-                            Cancel
-                          </button>
+                            return (
+                              <>
+                                <button
+                                  onClick={() => payment.manualVerifyTransaction(tx.tx_ref)}
+                                  disabled={isRetrying}
+                                  className="flex items-center px-3 py-1.5 text-blue-600 hover:text-blue-700 text-xs sm:text-sm disabled:opacity-50 touch-target rounded hover:bg-blue-50"
+                                >
+                                  {isRetrying ? (
+                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                  ) : (
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                  )}
+                                  Verify
+                                </button>
+
+                                <button
+                                  onClick={() => paymentAPI.openPaymentLink(tx.payment_link)}
+                                  className="flex items-center px-3 py-1.5 text-green-600 hover:text-green-700 text-xs sm:text-sm touch-target rounded hover:bg-green-50"
+                                >
+                                  <CreditCard className="w-3 h-3 mr-1" />
+                                  <span className="hidden sm:inline">Reopen Checkout</span>
+                                  <span className="sm:hidden">Reopen</span>
+                                </button>
+
+                                <button
+                                  onClick={() => payment.cancelPayment(tx.tx_ref)}
+                                  className="flex items-center px-3 py-1.5 text-red-600 hover:text-red-700 text-xs sm:text-sm touch-target rounded hover:bg-red-50"
+                                >
+                                  <XCircle className="w-3 h-3 mr-1" />
+                                  Cancel
+                                </button>
+                              </>
+                            );
+                          })()}
                         </>
                       )}
                     </div>
@@ -454,7 +483,7 @@ export const Transactions: React.FC = () => {
                 </button>
               </div>
             </div>
-            
+
             <div className="p-4 sm:p-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div><strong>Reference:</strong><br /><span className="text-xs break-all">{selectedTx.tx_ref}</span></div>
@@ -486,7 +515,7 @@ export const Transactions: React.FC = () => {
                 )}
               </div>
             </div>
-            
+
             <div className="p-4 sm:p-6 border-t bg-gray-50 sticky bottom-0">
               <button
                 onClick={() => setSelectedTx(null)}

@@ -5,6 +5,7 @@ import { useAppSelector } from '@/store/hook';
 import type { ApiResponse } from '@/types/index';
 import useWebSocket from './useWebsocket';
 import toast from 'react-hot-toast';
+import { toastInfo } from '@/utils/toastHelpers';
 
 interface PaymentFilters {
   status?: string;
@@ -495,6 +496,25 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
       }
     };
 
+    const handlePaymentAutoCancelled = (event: Event) => {
+    const detail = (event as CustomEvent)?.detail;
+    if (detail?.txRef) {
+      console.log('Payment auto-cancelled:', detail.reason);
+      setPendingTransactions(prev => prev.filter(ref => ref !== detail.txRef));
+      
+      // Refresh to show updated status
+      setTimeout(() => {
+        refreshTransactions();
+      }, 500);
+      
+      // Show helpful message based on reason
+      if (detail.reason === 'not_activated') {
+        // Payment was never completed on Flutterwave
+        toastInfo('Payment cancelled. You can create a new payment.');
+      }
+    }
+  };
+
     const handlePaymentWindowClosed = () => {
       // Optionally refresh data when payment window is closed
       setTimeout(() => {
@@ -507,12 +527,14 @@ export const usePayment = (options: UsePaymentOptions = {}): UsePaymentReturn =>
     window.addEventListener('payment:completed', handlePaymentCompleted);
     window.addEventListener('payment:failed', handlePaymentFailed);
     window.addEventListener('payment:cancelled', handlePaymentCancelled);
+    window.addEventListener('payment:auto_cancelled', handlePaymentAutoCancelled); // NEW
     window.addEventListener('payment:windowClosed', handlePaymentWindowClosed);
 
     return () => {
       window.removeEventListener('payment:completed', handlePaymentCompleted);
       window.removeEventListener('payment:failed', handlePaymentFailed);
       window.removeEventListener('payment:cancelled', handlePaymentCancelled);
+      window.removeEventListener('payment:auto_cancelled', handlePaymentAutoCancelled); // NEW
       window.removeEventListener('payment:windowClosed', handlePaymentWindowClosed);
     };
   }, [refreshBalance, refreshTransactions, pendingTransactions.length]);

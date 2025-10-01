@@ -62,7 +62,7 @@ export interface PaymentDeposit {
   ngn_amount: number;
   usd_equivalent: number;
   fx_rate: number;
-  status: 'PENDING_UNSETTLED' | 'PAID_SETTLED' | 'FAILED' | 'CANCELLED';
+  status: 'PENDING_UNSETTLED' | 'PAID_SETTLED' | 'FAILED' | 'CANCELLED' | 'NOT_ACTIVATED';
   payment_type: string;
   currency: string;
   customer_email?: string;
@@ -321,39 +321,71 @@ class PaymentAPI {
     }
   }
 
-  // Verify payment manually
-  async verifyPayment(txRef: string): Promise<{ success: boolean; message: string; data?: any }> {
-    try {
-      console.log('Manually verifying payment:', txRef);
-      
-      const response = await client.post(`/payments/verify/${txRef}`);
+  // src/api/payments.ts - Enhanced verifyPayment with better error codes
 
-      if (response.data.success) {
-        console.log('Payment verification successful');
-        toast.success(response.data.message || 'Payment verified successfully!');
-        
-        // Dispatch custom event for payment completion
-        window.dispatchEvent(new CustomEvent('payment:completed', {
-          detail: { txRef, data: response.data.data }
-        }));
-        
-        return response.data;
-      }
+// Verify payment manually
+async verifyPayment(txRef: string): Promise<{ success: boolean; message: string; data?: any }> {
+  try {
+    console.log('Manually verifying payment:', txRef);
+    
+    const response = await client.post(`/payments/verify/${txRef}`);
+
+    if (response.data.success) {
+      console.log('Payment verification successful');
+      toast.success(response.data.message || 'Payment verified successfully!');
       
-      throw new Error(response.data.message || 'Payment verification failed');
-    } catch (error: any) {
-      console.error('Payment verification error:', error);
-      const message = error.response?.data?.message || error.message || 'Verification failed';
-      toast.error(message);
-      
-      // Dispatch custom event for payment failure
-      window.dispatchEvent(new CustomEvent('payment:failed', {
-        detail: { txRef, error: message }
+      // Dispatch custom event for payment completion
+      window.dispatchEvent(new CustomEvent('payment:completed', {
+        detail: { txRef, data: response.data.data }
       }));
       
-      throw error;
+      return response.data;
     }
+    
+    throw new Error(response.data.message || 'Payment verification failed');
+  } catch (error: any) {
+    console.error('Payment verification error:', error);
+    
+    const errorData = error.response?.data;
+    const errorCode = errorData?.code;
+    const message = errorData?.error || error.message || 'Verification failed';
+    
+    // Handle different error codes with appropriate UI feedback
+    switch (errorCode) {
+      case 'PAYMENT_EXPIRED':
+        toast.error('Payment session expired. Please create a new payment.', {
+          duration: 5000,
+          icon: '⏰'
+        });
+        break;
+        
+      case 'PAYMENT_NOT_ACTIVATED':
+        toastWarning('Payment was never completed. Creating a new payment...');
+        // Auto-remove from pending list since it's now cancelled
+        window.dispatchEvent(new CustomEvent('payment:auto_cancelled', {
+          detail: { txRef, reason: 'not_activated' }
+        }));
+        break;
+        
+      case 'PAYMENT_FAILED':
+        toast.error('Payment verification failed. Please try again or contact support.', {
+          duration: 5000,
+          icon: '⚠️'
+        });
+        break;
+        
+      default:
+        toast.error(message);
+    }
+    
+    // Dispatch custom event for payment failure with error code
+    window.dispatchEvent(new CustomEvent('payment:failed', {
+      detail: { txRef, error: message, code: errorCode }
+    }));
+    
+    throw error;
   }
+}
 
   // Cancel payment
   async cancelPayment(txRef: string): Promise<{ success: boolean; message: string }> {
