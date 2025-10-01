@@ -113,80 +113,80 @@ class FlutterwaveService {
 
   // Create payment session
   async createPaymentSession({
-  userId,
-  amount,
-  currency = 'NGN',
-  paymentType = 'card',
-  customerEmail,
-  customerName,
-  customerPhone,
-  redirectUrl,
-  existingTxRef = null, // NEW: Allow reusing tx_ref
-  meta = {}
-}) {
-  try {
-    // Use existing tx_ref if provided, otherwise generate new
-    const txRef = existingTxRef || this.generateTxRef(userId);
-    const pool = getPool();
+    userId,
+    amount,
+    currency = 'NGN',
+    paymentType = 'card',
+    customerEmail,
+    customerName,
+    customerPhone,
+    redirectUrl,
+    existingTxRef = null, // NEW: Allow reusing tx_ref
+    meta = {}
+  }) {
+    try {
+      // Use existing tx_ref if provided, otherwise generate new
+      const txRef = existingTxRef || this.generateTxRef(userId);
+      const pool = getPool();
 
-    logger.info('Creating Flutterwave payment session:', {
-      userId,
-      amount,
-      currency,
-      paymentType,
-      txRef,
-      isRefresh: !!existingTxRef
-    });
+      logger.info('Creating Flutterwave payment session:', {
+        userId,
+        amount,
+        currency,
+        paymentType,
+        txRef,
+        isRefresh: !!existingTxRef
+      });
 
-    // Calculate expiration (15 minutes from now)
-    const expiresAt = new Date(Date.now() + (15 * 60 * 1000));
+      // Calculate expiration (15 minutes from now)
+      const expiresAt = new Date(Date.now() + (15 * 60 * 1000));
 
-    // Build the refresh URL - this is what Flutterwave calls
-    const refreshUrl = `${process.env.BACKEND_URL}/api/payments/refresh-checkout/${txRef}`;
+      // Build the refresh URL - this is what Flutterwave calls
+      const refreshUrl = `${process.env.BACKEND_URL}/api/payments/flutterwave/refresh-checkout/${txRef}`;
 
-    // Prepare payment payload according to v3 API specs
-    const payload = {
-      tx_ref: txRef,
-      amount: parseFloat(amount).toString(),
-      currency: currency.toUpperCase(),
-      redirect_url: redirectUrl || `${process.env.FRONTEND_URL}/transactions?status=success&tx_ref=${txRef}`,
-      refresh_url: refreshUrl, // CRITICAL: Flutterwave calls this when session expires
-      payment_options: this.getPaymentOptions(paymentType),
-      customer: {
-        email: customerEmail || 'customer@example.com',
-        name: customerName || 'SMS Platform User',
-        phonenumber: customerPhone || ''
-      },
-      customizations: {
-        title: 'SMS Verification Platform',
-        description: existingTxRef ? 'Refreshed Checkout Session' : 'Account Balance Top-up',
-        logo: `${process.env.FRONTEND_URL}/smsLogo.png`
-      },
-      meta: {
-        user_id: userId.toString(),
-        payment_type: paymentType,
-        platform: 'sms-verification',
-        is_refresh: !!existingTxRef,
-        ...meta
-      }
-    };
+      // Prepare payment payload according to v3 API specs
+      const payload = {
+        tx_ref: txRef,
+        amount: parseFloat(amount).toString(),
+        currency: currency.toUpperCase(),
+        redirect_url: redirectUrl || `${process.env.FRONTEND_URL}/transactions?status=success&tx_ref=${txRef}`,
+        refresh_url: refreshUrl, // CRITICAL: Flutterwave calls this when session expires
+        payment_options: this.getPaymentOptions(paymentType),
+        customer: {
+          email: customerEmail || 'customer@example.com',
+          name: customerName || 'SMS Platform User',
+          phonenumber: customerPhone || ''
+        },
+        customizations: {
+          title: 'SMS Verification Platform',
+          description: existingTxRef ? 'Refreshed Checkout Session' : 'Account Balance Top-up',
+          logo: `${process.env.FRONTEND_URL}/smsLogo.png`
+        },
+        meta: {
+          user_id: userId.toString(),
+          payment_type: paymentType,
+          platform: 'sms-verification',
+          is_refresh: !!existingTxRef,
+          ...meta
+        }
+      };
 
-    logger.info('Making Flutterwave payment request:', {
-      txRef,
-      amount: payload.amount,
-      currency: payload.currency,
-      refresh_url: refreshUrl
-    });
+      logger.info('Making Flutterwave payment request:', {
+        txRef,
+        amount: payload.amount,
+        currency: payload.currency,
+        refresh_url: refreshUrl
+      });
 
-    // Make request to v3 endpoint
-    const response = await this.client.post('/payments', payload);
+      // Make request to v3 endpoint
+      const response = await this.client.post('/payments', payload);
 
-    if (response.data?.status === 'success' && response.data?.data?.link) {
-      const { data: flwData } = response.data;
+      if (response.data?.status === 'success' && response.data?.data?.link) {
+        const { data: flwData } = response.data;
 
-      // If this is a refresh, UPDATE existing record instead of INSERT
-      if (existingTxRef) {
-        await pool.execute(`
+        // If this is a refresh, UPDATE existing record instead of INSERT
+        if (existingTxRef) {
+          await pool.execute(`
           UPDATE payment_deposits 
           SET 
             payment_link = ?,
@@ -199,36 +199,36 @@ class FlutterwaveService {
             updated_at = NOW()
           WHERE tx_ref = ?
         `, [
-          flwData.link,
-          flwData.hosted_link || null,
-          expiresAt,
-          JSON.stringify(response.data),
-          txRef
-        ]);
+            flwData.link,
+            flwData.hosted_link || null,
+            expiresAt,
+            JSON.stringify(response.data),
+            txRef
+          ]);
 
-        logger.info('Payment session refreshed:', { txRef });
-      } else {
-        // New payment - INSERT as before
-        const dbParams = [
-          userId,
-          txRef,
-          amount,
-          0, // usd_equivalent
-          0, // fx_rate
-          paymentType,
-          currency,
-          customerEmail || null,
-          customerName || null,
-          customerPhone || null,
-          flwData.link,
-          flwData.hosted_link || null,
-          expiresAt,
-          JSON.stringify(response.data),
-          JSON.stringify(meta),
-          'PENDING_UNSETTLED'
-        ];
+          logger.info('Payment session refreshed:', { txRef });
+        } else {
+          // New payment - INSERT as before
+          const dbParams = [
+            userId,
+            txRef,
+            amount,
+            0, // usd_equivalent
+            0, // fx_rate
+            paymentType,
+            currency,
+            customerEmail || null,
+            customerName || null,
+            customerPhone || null,
+            flwData.link,
+            flwData.hosted_link || null,
+            expiresAt,
+            JSON.stringify(response.data),
+            JSON.stringify(meta),
+            'PENDING_UNSETTLED'
+          ];
 
-        await pool.execute(`
+          await pool.execute(`
           INSERT INTO payment_deposits (
             user_id, tx_ref, ngn_amount, usd_equivalent, fx_rate, 
             payment_type, currency, customer_email, customer_name, 
@@ -237,39 +237,39 @@ class FlutterwaveService {
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, dbParams);
 
-        logger.info('New payment session created:', { txRef });
+          logger.info('New payment session created:', { txRef });
+        }
+
+        return {
+          success: true,
+          tx_ref: txRef,
+          payment_link: flwData.link,
+          checkout_token: flwData.hosted_link || null,
+          expires_at: expiresAt.toISOString(),
+          amount,
+          currency
+        };
+
+      } else {
+        throw new Error(response.data?.message || 'Failed to create payment session');
       }
 
-      return {
-        success: true,
-        tx_ref: txRef,
-        payment_link: flwData.link,
-        checkout_token: flwData.hosted_link || null,
-        expires_at: expiresAt.toISOString(),
+    } catch (error) {
+      logger.error('Create payment session error:', {
+        error: error.message,
+        response: error.response?.data,
+        userId,
         amount,
-        currency
-      };
+        status: error.response?.status
+      });
 
-    } else {
-      throw new Error(response.data?.message || 'Failed to create payment session');
+      throw new Error(
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to create payment session'
+      );
     }
-
-  } catch (error) {
-    logger.error('Create payment session error:', {
-      error: error.message,
-      response: error.response?.data,
-      userId,
-      amount,
-      status: error.response?.status
-    });
-
-    throw new Error(
-      error.response?.data?.message ||
-      error.message ||
-      'Failed to create payment session'
-    );
   }
-}
 
   async verifyTransaction(txId, source = 'manual') {
     try {
@@ -312,8 +312,14 @@ class FlutterwaveService {
 
             txId = tx.id; // continue with Flutterwave verify below
           } else {
-            return { success: false, error: 'Transaction not found on Flutterwave by tx_ref' };
+            return {
+              success: true,
+              status: 'NOT_ACTIVATED',
+              message: 'Payment not activated yet or user has not completed payment',
+              txRef: txId
+            };
           }
+
         } else {
           // Use the stored flw_tx_id
           txId = deposit.flw_tx_id;

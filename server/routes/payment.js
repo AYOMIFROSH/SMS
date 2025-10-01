@@ -438,7 +438,7 @@ router.post('/verify/:txRef',
 
       // Check if deposit belongs to user
       const [deposits] = await pool.execute(
-        'SELECT id, status, flw_tx_id FROM payment_deposits WHERE tx_ref = ? AND user_id = ?',
+        'SELECT id, status, flw_tx_id, expires_at FROM payment_deposits WHERE tx_ref = ? AND user_id = ?',
         [txRef, userId]
       );
 
@@ -460,6 +460,32 @@ router.post('/verify/:txRef',
         });
       }
 
+      // Check if payment is expired
+      const now = new Date();
+      const expiresAt = new Date(deposit.expires_at);
+      const isExpired = now > expiresAt;
+
+      if (isExpired && deposit.status === 'PENDING_UNSETTLED') {
+        // Auto-cancel expired pending payment
+        await pool.execute(
+          'UPDATE payment_deposits SET status = ?, updated_at = NOW() WHERE tx_ref = ?',
+          ['CANCELLED', txRef]
+        );
+
+        logger.info('Expired payment auto-cancelled:', { txRef, userId });
+
+        return res.status(400).json({
+          success: false,
+          error: 'Payment session has expired. Please create a new payment.',
+          code: 'PAYMENT_EXPIRED',
+          data: {
+            tx_ref: txRef,
+            status: 'CANCELLED',
+            action_required: 'create_new_payment'
+          }
+        });
+      }
+
       // Use Flutterwave TX ID for verification if available
       const verifyId = deposit.flw_tx_id || txRef;
       
@@ -477,6 +503,46 @@ router.post('/verify/:txRef',
           success: false,
           error: verificationResult.error || 'Verification failed',
           code: 'VERIFICATION_FAILED'
+        });
+      }
+
+      // Handle NOT_ACTIVATED status (payment was never initiated on Flutterwave)
+      if (verificationResult.status === 'NOT_ACTIVATED') {
+        // Mark as CANCELLED since user never completed checkout
+        await pool.execute(
+          'UPDATE payment_deposits SET status = ?, updated_at = NOW() WHERE tx_ref = ?',
+          ['CANCELLED', txRef]
+        );
+
+        // Log the cancellation
+        await pool.execute(`
+          INSERT INTO payment_transaction_logs (
+            user_id, tx_ref, action, status_before, status_after, metadata
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          userId, 
+          txRef, 
+          'auto_cancelled_not_activated', 
+          'PENDING_UNSETTLED', 
+          'CANCELLED',
+          JSON.stringify({ 
+            reason: 'Payment not activated on Flutterwave',
+            verification_attempt: 'manual'
+          })
+        ]);
+
+        logger.info('Payment cancelled - never activated:', { txRef, userId });
+
+        return res.status(400).json({
+          success: false,
+          error: 'Payment was not completed. The checkout session was not activated.',
+          code: 'PAYMENT_NOT_ACTIVATED',
+          data: {
+            tx_ref: txRef,
+            status: 'CANCELLED',
+            message: 'This payment was cancelled because it was never activated. Please create a new payment if you wish to proceed.',
+            action_required: 'create_new_payment'
+          }
         });
       }
 
@@ -519,13 +585,32 @@ router.post('/verify/:txRef',
           ['FAILED', txRef]
         );
 
+        // Log the failure
+        await pool.execute(`
+          INSERT INTO payment_transaction_logs (
+            user_id, tx_ref, action, status_before, status_after, metadata
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          userId, 
+          txRef, 
+          'payment_failed', 
+          'PENDING_UNSETTLED', 
+          'FAILED',
+          JSON.stringify({ 
+            flw_status: txData.status,
+            verification_attempt: 'manual'
+          })
+        ]);
+
+        logger.info('Payment marked as failed:', { txRef, userId, flwStatus: txData.status });
+
         res.status(400).json({
           success: false,
           error: `Payment verification failed: ${txData.status}`,
           code: 'PAYMENT_FAILED',
           data: {
             tx_ref: txRef,
-            status: txData.status,
+            status: 'FAILED',
             flw_status: txData.status
           }
         });
@@ -547,7 +632,6 @@ router.post('/verify/:txRef',
     }
   }
 );
-
 // DELETE /api/payments/cancel/:txRef - Cancel pending payment
 router.delete('/cancel/:txRef',
   rateLimiters.api,
@@ -765,130 +849,6 @@ router.get('/test-flw-connection',
     }
   }
 );
-
-// POST /api/payments/refresh-checkout/:txRef
-router.post('/refresh-checkout/:txRef', async (req, res) => {
-  try {
-    const { txRef } = req.params;
-    const pool = getPool();
-
-    logger.info('Flutterwave refresh-checkout called:', { txRef });
-
-    // Get the original deposit
-    const [deposits] = await pool.execute(
-      `SELECT id, user_id, ngn_amount, usd_equivalent, fx_rate, payment_type, 
-              customer_email, customer_name, customer_phone, status, expires_at 
-       FROM payment_deposits 
-       WHERE tx_ref = ?`,
-      [txRef]
-    );
-
-    if (deposits.length === 0) {
-      logger.warn('Refresh checkout: transaction not found', { txRef });
-      return res.status(404).json({
-        status: 'error',
-        message: 'Transaction not found',
-        error: 'TRANSACTION_NOT_FOUND'
-      });
-    }
-
-    const deposit = deposits[0];
-
-    // Check if transaction is still pending and not expired
-    if (deposit.status !== 'PENDING_UNSETTLED') {
-      logger.info('Refresh checkout: transaction not pending', { 
-        txRef, 
-        status: deposit.status 
-      });
-      return res.json({
-        status: 'error',
-        message: 'Transaction is no longer pending',
-        currentStatus: deposit.status
-      });
-    }
-
-    // Check expiration
-    const expiresAt = new Date(deposit.expires_at);
-    const now = new Date();
-    
-    if (now > expiresAt) {
-      logger.info('Refresh checkout: transaction expired', { txRef });
-      
-      // Mark as expired in database
-      await pool.execute(
-        'UPDATE payment_deposits SET status = ?, updated_at = NOW() WHERE tx_ref = ?',
-        ['CANCELLED', txRef]
-      );
-
-      return res.json({
-        status: 'error',
-        message: 'Transaction has expired',
-        error: 'TRANSACTION_EXPIRED'
-      });
-    }
-
-    // Generate a NEW payment session with SAME tx_ref
-    // This maintains transaction continuity
-    const newSession = await flutterwaveService.createPaymentSession({
-      userId: deposit.user_id,
-      amount: deposit.ngn_amount,
-      paymentType: deposit.payment_type,
-      customerEmail: deposit.customer_email,
-      customerName: deposit.customer_name,
-      customerPhone: deposit.customer_phone,
-      // IMPORTANT: Reuse the same tx_ref for continuity
-      existingTxRef: txRef,
-      meta: { 
-        refresh_of: txRef,
-        refresh_timestamp: new Date().toISOString()
-      }
-    });
-
-    // Update the payment_link in database
-    await pool.execute(
-      `UPDATE payment_deposits 
-       SET payment_link = ?, 
-           checkout_token = ?,
-           expires_at = ?,
-           updated_at = NOW()
-       WHERE tx_ref = ?`,
-      [
-        newSession.payment_link,
-        newSession.checkout_token || null,
-        newSession.expires_at,
-        txRef
-      ]
-    );
-
-    logger.info('Checkout refreshed successfully:', { 
-      txRef, 
-      newLink: newSession.payment_link.substring(0, 50) 
-    });
-
-    // Return the new payment link to Flutterwave
-    res.json({
-      status: 'success',
-      message: 'Checkout refreshed',
-      data: {
-        tx_ref: txRef,
-        payment_link: newSession.payment_link,
-        expires_at: newSession.expires_at
-      }
-    });
-
-  } catch (error) {
-    logger.error('Refresh checkout error:', { 
-      error: error.message,
-      txRef: req.params.txRef 
-    });
-    
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to refresh checkout',
-      error: error.message
-    });
-  }
-});
 
 router.get('/checkout-status/:txRef',
   rateLimiters.api,
