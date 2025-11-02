@@ -27,7 +27,7 @@ const BuyNumber: React.FC = () => {
   useDocumentTitle("SMS Purchase Numbers");
 
   const dispatch = useDispatch<AppDispatch>();
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
 
   const {
     services,
@@ -52,7 +52,7 @@ const BuyNumber: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [showMobileSummary, setShowMobileSummary] = useState(false);
-  
+
   // Rate limit handling
   const [rateLimitInfo, setRateLimitInfo] = useState<{
     active: boolean;
@@ -66,7 +66,7 @@ const BuyNumber: React.FC = () => {
       const timer = setTimeout(() => {
         dispatch(clearError());
       }, 8000); // Clear error after 8 seconds
-      
+
       return () => clearTimeout(timer);
     }
   }, [numbersError, dispatch]);
@@ -77,30 +77,30 @@ const BuyNumber: React.FC = () => {
       const timer = setTimeout(() => {
         dispatch(clearError());
       }, 2000);
-      
+
       return () => clearTimeout(timer);
     }
   }, [selectedCountry, selectedService, selectedOperator, numbersError, dispatch]);
 
   // Rate limit countdown
   // Rate limit countdown - FIXED (line 86-98)
-useEffect(() => {
-  if (rateLimitInfo?.active && rateLimitInfo.countdown > 0) {
-    const timer = setInterval(() => {
-      setRateLimitInfo(prev => {
-        if (!prev || prev.countdown <= 1) {
-          return null; // Clear rate limit when countdown finishes
-        }
-        return {
-          ...prev,
-          countdown: prev.countdown - 1 // Decrease by 1 every second
-        };
-      });
-    }, 1000); // ✅ Update every 1 SECOND (not 25 seconds)
+  useEffect(() => {
+    if (rateLimitInfo?.active && rateLimitInfo.countdown > 0) {
+      const timer = setInterval(() => {
+        setRateLimitInfo(prev => {
+          if (!prev || prev.countdown <= 1) {
+            return null; // Clear rate limit when countdown finishes
+          }
+          return {
+            ...prev,
+            countdown: prev.countdown - 1 // Decrease by 1 every second
+          };
+        });
+      }, 1000); // ✅ Update every 1 SECOND (not 25 seconds)
 
-    return () => clearInterval(timer);
-  }
-}, [rateLimitInfo]);
+      return () => clearInterval(timer);
+    }
+  }, [rateLimitInfo]);
 
   // Initialize data - ONLY ONCE
   useEffect(() => {
@@ -113,11 +113,11 @@ useEffect(() => {
   useEffect(() => {
     if (selectedCountry && !operators[selectedCountry]) {
       console.log('📡 Scheduling operator fetch for country:', selectedCountry);
-      
+
       const timer = setTimeout(() => {
         dispatch(fetchOperators(selectedCountry));
       }, 500); // Add 500ms delay
-      
+
       return () => clearTimeout(timer);
     }
   }, [selectedCountry, dispatch, operators]);
@@ -127,7 +127,7 @@ useEffect(() => {
     if (selectedCountry && selectedService && selectedOperator !== null && step === 'confirm') {
       if (!prices[selectedCountry]?.[selectedService]) {
         console.log('💲 Fetching prices for purchase confirmation:', { country: selectedCountry, service: selectedService });
-        
+
         const timer = setTimeout(() => {
           dispatch(fetchPrices({ country: selectedCountry, service: selectedService }))
             .catch((error: any) => {
@@ -140,7 +140,7 @@ useEffect(() => {
               }
             });
         }, 300);
-        
+
         return () => clearTimeout(timer);
       }
     }
@@ -226,7 +226,7 @@ useEffect(() => {
       setStep('country');
       setMaxPrice(null);
 
-      navigate('/active-numbers'); 
+      navigate('/active-numbers');
 
     } catch (error: any) {
       console.error('❌ Purchase failed:', error);
@@ -753,15 +753,15 @@ useEffect(() => {
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Purchasing...</span>
                   </span>
-                ) : pricesLoading ? (
-                  <span className="flex items-center justify-center">
-                    <LoadingSpinner size="sm" color="white" />
-                    <span className="ml-2">Loading Price...</span>
-                  </span>
                 ) : payment.loading.balance ? (
                   <span className="flex items-center justify-center">
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Updating Balance...</span>
+                  </span>
+                ) : pricesLoading ? (
+                  <span className="flex items-center justify-center">
+                    <LoadingSpinner size="sm" color="white" />
+                    <span className="ml-2">Loading Price...</span>
                   </span>
                 ) : (
                   'Purchase Number'
