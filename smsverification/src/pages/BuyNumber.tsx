@@ -83,7 +83,7 @@ const BuyNumber: React.FC = () => {
   }, [selectedCountry, selectedService, selectedOperator, numbersError, dispatch]);
 
   // Rate limit countdown
-  // Rate limit countdown - FIXED
+  // Rate limit countdown - FIXED (line 86-98)
 useEffect(() => {
   if (rateLimitInfo?.active && rateLimitInfo.countdown > 0) {
     const timer = setInterval(() => {
@@ -93,10 +93,10 @@ useEffect(() => {
         }
         return {
           ...prev,
-          countdown: prev.countdown - 1
+          countdown: prev.countdown - 1 // Decrease by 1 every second
         };
       });
-    }, 1000); // ✅ NOW IT'S 1 SECOND
+    }, 1000); // ✅ Update every 1 SECOND (not 25 seconds)
 
     return () => clearInterval(timer);
   }
