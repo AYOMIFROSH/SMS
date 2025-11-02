@@ -753,15 +753,15 @@ const BuyNumber: React.FC = () => {
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Purchasing...</span>
                   </span>
-                ) : payment.loading.balance ? (
-                  <span className="flex items-center justify-center">
-                    <LoadingSpinner size="sm" color="white" />
-                    <span className="ml-2">Updating Balance...</span>
-                  </span>
                 ) : pricesLoading ? (
                   <span className="flex items-center justify-center">
                     <LoadingSpinner size="sm" color="white" />
                     <span className="ml-2">Loading Price...</span>
+                  </span>
+                ) : payment.loading.balance ? (
+                  <span className="flex items-center justify-center">
+                    <LoadingSpinner size="sm" color="white" />
+                    <span className="ml-2">Updating Balance...</span>
                   </span>
                 ) : (
                   'Purchase Number'
