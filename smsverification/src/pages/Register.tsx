@@ -198,7 +198,7 @@ const Register: React.FC = () => {
           {/* Header - Ultra Compact */}
           <div className="mb-2 text-center">
             <h1 className="text-lg lg:text-xl font-bold text-slate-800 mb-1">
-              Join FizzBuzz Platform
+              Join FizzBuzzUp Platform
             </h1>
             <p className="text-xs text-slate-600">
               Create your account for all services

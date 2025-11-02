@@ -26,24 +26,24 @@ const Login: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Partial<LoginFormData>>({});
 
   // Redirect if already authenticated
-useEffect(() => {
-  if (isAuthenticated && isReady) {
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const redirectDelay = isMobile ? 500 : 200; // Longer delay for mobile
-    
-    setTimeout(() => {
-      navigate("/", { replace: true });
-    }, redirectDelay);
-  }
-}, [isAuthenticated, isReady, navigate]);
+  useEffect(() => {
+    if (isAuthenticated && isReady) {
+      const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const redirectDelay = isMobile ? 500 : 200; // Longer delay for mobile
+
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, redirectDelay);
+    }
+  }, [isAuthenticated, isReady, navigate]);
 
   const validateForm = (): boolean => {
     const errors: Partial<LoginFormData> = {};
-    
+
     if (!formData.username.trim()) {
       errors.username = "Username or email is required";
     }
-    
+
     if (!formData.password.trim()) {
       errors.password = "Password is required";
     } else if (formData.password.length < 3) {
@@ -59,7 +59,7 @@ useEffect(() => {
   ) => {
     const value = e.target.value;
     setFormData(prev => ({ ...prev, [field]: value }));
-    
+
     // Clear field error when user starts typing
     if (formErrors[field]) {
       setFormErrors(prev => ({ ...prev, [field]: undefined }));
@@ -72,9 +72,9 @@ useEffect(() => {
     if (!validateForm()) return;
 
     console.log("Submitting login payload:", {
-  username: formData.username,
-  password: formData.password
-});
+      username: formData.username,
+      password: formData.password
+    });
 
 
     setLoading(true);
@@ -88,15 +88,15 @@ useEffect(() => {
       })).unwrap();
 
       // toast.success("Login successful!");
-      
+
       // Navigation will be handled by the useEffect above
-      
+
     } catch (error: any) {
       console.error('Login failed:', error);
-      
+
       // Handle specific error types
       let errorMessage = "Login failed. Please try again.";
-      
+
       if (error.includes?.('not found')) {
         errorMessage = "Account not found with this username or email";
       } else if (error.includes?.('password')) {
@@ -110,10 +110,10 @@ useEffect(() => {
       }
 
       toast.error(errorMessage);
-      
+
       // Clear password on error
       setFormData(prev => ({ ...prev, password: "" }));
-      
+
     } finally {
       setLoading(false);
     }
@@ -137,19 +137,33 @@ useEffect(() => {
       {/* Left Side - Login Form */}
       <div className="flex-1 flex items-center justify-center bg-slate-50 px-8 lg:px-12">
         <div className="w-full max-w-md">
-          <div className="mb-8">
+          <div className="mb-5">
             <h1 className="text-3xl font-bold text-slate-800 mb-2">
               Welcome back
             </h1>
-            <p className="text-slate-600">
-              Please sign in to your SMS Dashboard account
-            </p>
+          </div>
+
+          {/* FizzBuzzUp Integration Notice - Add this right after the heading div and before the form */}
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-start space-x-3">
+              <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-blue-800 mb-1">
+                  Existing FizzBuzzUp User?
+                </p>
+                <p className="text-xs text-blue-700">
+                  Use your existing FizzBuzzUp account credentials to login. All FizzBuzzUp services share the same authentication.
+                </p>
+              </div>
+            </div>
           </div>
 
           <form className="space-y-6" onSubmit={handleSubmit} noValidate>
             <div>
-              <label 
-                htmlFor="username" 
+              <label
+                htmlFor="username"
                 className="block text-sm font-semibold text-slate-700 mb-2"
               >
                 Username or Email *
@@ -163,8 +177,8 @@ useEffect(() => {
                   w-full px-4 py-3 bg-white border rounded-lg 
                   focus:outline-none focus:ring-2 transition-all duration-200 
                   text-slate-800 placeholder-slate-500
-                  ${formErrors.username 
-                    ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
+                  ${formErrors.username
+                    ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
                     : 'border-slate-300 focus:ring-blue-500 focus:border-blue-500'
                   }
                 `}
@@ -179,8 +193,8 @@ useEffect(() => {
             </div>
 
             <div>
-              <label 
-                htmlFor="password" 
+              <label
+                htmlFor="password"
                 className="block text-sm font-semibold text-slate-700 mb-2"
               >
                 Password *
@@ -194,8 +208,8 @@ useEffect(() => {
                   w-full px-4 py-3 bg-white border rounded-lg 
                   focus:outline-none focus:ring-2 transition-all duration-200 
                   text-slate-800 placeholder-slate-500
-                  ${formErrors.password 
-                    ? 'border-red-300 focus:ring-red-500 focus:border-red-500' 
+                  ${formErrors.password
+                    ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
                     : 'border-slate-300 focus:ring-blue-500 focus:border-blue-500'
                   }
                 `}
@@ -238,8 +252,8 @@ useEffect(() => {
 
             <p className="text-sm text-slate-600">
               Don't have an account?{' '}
-              <Link 
-                to="/register" 
+              <Link
+                to="/register"
                 className="text-blue-600 hover:text-blue-700 font-semibold underline"
               >
                 Create account
@@ -247,9 +261,9 @@ useEffect(() => {
             </p>
 
             <p className="text-sm text-slate-500">
-              Secure sms purchasing platform 
+              Secure sms purchasing platform
             </p>
-            
+
             <div className="flex justify-center space-x-4 text-xs text-slate-400">
               <span>payment secure</span>
               <span>•</span>
@@ -266,8 +280,8 @@ useEffect(() => {
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-white rounded-full animate-pulse"></div>
-          <div className="absolute bottom-1/4 right-1/4 w-48 h-48 bg-white rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
-          <div className="absolute top-3/4 left-1/2 w-32 h-32 bg-white rounded-full animate-pulse" style={{animationDelay: '2s'}}></div>
+          <div className="absolute bottom-1/4 right-1/4 w-48 h-48 bg-white rounded-full animate-pulse" style={{ animationDelay: '1s' }}></div>
+          <div className="absolute top-3/4 left-1/2 w-32 h-32 bg-white rounded-full animate-pulse" style={{ animationDelay: '2s' }}></div>
         </div>
 
         {/* Content */}
