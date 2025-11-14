@@ -13,6 +13,8 @@ const { createClient } = require('redis');
     password: 'bF8YsQXcEItJP6OwIy8sR8qPhamBYKdU'
   });
 
+  
+
   client.on('error', (err) => console.error('CLIENT-ERROR:', err && err.message));
   try {
     await client.connect();
