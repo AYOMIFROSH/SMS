@@ -24,7 +24,7 @@ const smsBackgroundService = require('./services/smsBackgroudService');
 const app = express();
 const server = http.createServer(app);
 
-require('./cron/reconcileJob'); // start reconcile job
+// REMOVED: require('./cron/reconcileJob'); - moved to startServer() with error handling
 
 const assetsPath = path.join(__dirname, 'assets');
 app.use('/assets', express.static(assetsPath));
@@ -429,14 +429,22 @@ async function startServer() {
     webSocketService.initialize(server);
     logger.info('✅ WebSocket service initialized');
 
+    // Start SMS Background Service
     try {
-      // Start the service
       smsBackgroundService.start();
-      logger.info('SMS Background Service started successfully');
+      logger.info('✅ SMS Background Service started successfully');
     } catch (error) {
-      logger.error('Failed to start SMS Background Service:', error);
-      // Don't crash the server if background service fails
-      console.error('Warning: SMS real-time checking disabled due to startup error');
+      logger.error('❌ Failed to start SMS Background Service:', error);
+      console.error('⚠️ Warning: SMS real-time checking disabled due to startup error');
+    }
+
+    // Start Reconciliation Cron Job
+    try {
+      require('./cron/reconcileJob');
+      logger.info('✅ Reconciliation cron job started');
+    } catch (cronError) {
+      logger.error('❌ Reconciliation cron job failed:', cronError);
+      console.error('⚠️ Warning: Reconciliation job disabled - non-critical');
     }
 
     // Start server
@@ -474,6 +482,8 @@ async function startServer() {
 
   } catch (error) {
     logger.error('❌ Server startup failed:', error);
+    console.error('❌ FATAL ERROR:', error.message);
+    console.error('Stack trace:', error.stack);
     process.exit(1);
   }
 
