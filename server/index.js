@@ -388,7 +388,10 @@ async function startServer() {
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     if (missingVars.length > 0) {
-      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+      const errorMsg = `Missing required environment variables: ${missingVars.join(', ')}`;
+      console.error('❌ STARTUP ERROR:', errorMsg);
+      logger.error('❌ STARTUP ERROR:', errorMsg);
+      throw new Error(errorMsg);
     }
 
 
@@ -526,7 +529,7 @@ async function gracefulShutdown(signal) {
         logger.warn('⚠️ Shutdown timeout reached, forcing close');
         resolve();
       }, 30000);
-      
+
       server.close(() => {
         clearTimeout(timeout);
         logger.info('✅ HTTP server closed');
