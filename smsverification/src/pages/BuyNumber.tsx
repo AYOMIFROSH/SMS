@@ -16,7 +16,7 @@ import CountrySelector from '@/components/services/CountrySelector';
 import PriceDisplay from '@/components/services/PriceDisplay';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
-import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Clock, Info } from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Clock} from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
@@ -511,19 +511,7 @@ const BuyNumber: React.FC = () => {
           />
         </div>
 
-        {/* Optimization Info Banner */}
-        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start space-x-3">
-            <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <h4 className="text-sm font-medium text-blue-800">Optimized Purchase Flow</h4>
-              <p className="text-sm text-blue-700 mt-1">
-                We've streamlined the process! Countries and services load instantly from cache. 
-                Operator selection is automatic for best availability. Prices are fetched only once when you confirm.
-              </p>
-            </div>
-          </div>
-        </div>
+        
       </div>
 
       {/* Content Container */}
