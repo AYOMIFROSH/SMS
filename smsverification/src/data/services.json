@@ -1,0 +1,198 @@
+[
+  {
+    "code": "wa",
+    "name": "WhatsApp",
+    "category": "messaging",
+    "popular": true,
+    "icon": "💬"
+  },
+  {
+    "code": "tg",
+    "name": "Telegram",
+    "category": "messaging",
+    "popular": true,
+    "icon": "📱"
+  },
+  {
+    "code": "go",
+    "name": "Google",
+    "category": "social",
+    "popular": true,
+    "icon": "🔍"
+  },
+  {
+    "code": "fb",
+    "name": "Facebook",
+    "category": "social",
+    "popular": true,
+    "icon": "👥"
+  },
+  {
+    "code": "ig",
+    "name": "Instagram",
+    "category": "social",
+    "popular": true,
+    "icon": "📸"
+  },
+  {
+    "code": "tw",
+    "name": "Twitter",
+    "category": "social",
+    "popular": true,
+    "icon": "🐦"
+  },
+  {
+    "code": "vk",
+    "name": "VKontakte",
+    "category": "social",
+    "popular": false,
+    "icon": "🌐"
+  },
+  {
+    "code": "ok",
+    "name": "Odnoklassniki",
+    "category": "social",
+    "popular": false,
+    "icon": "🌐"
+  },
+  {
+    "code": "vi",
+    "name": "Viber",
+    "category": "messaging",
+    "popular": false,
+    "icon": "📞"
+  },
+  {
+    "code": "uber",
+    "name": "Uber",
+    "category": "services",
+    "popular": true,
+    "icon": "🚗"
+  },
+  {
+    "code": "dc",
+    "name": "Discord",
+    "category": "messaging",
+    "popular": true,
+    "icon": "🎮"
+  },
+  {
+    "code": "tt",
+    "name": "TikTok",
+    "category": "social",
+    "popular": true,
+    "icon": "🎵"
+  },
+  {
+    "code": "nf",
+    "name": "Netflix",
+    "category": "entertainment",
+    "popular": true,
+    "icon": "🎬"
+  },
+  {
+    "code": "am",
+    "name": "Amazon",
+    "category": "services",
+    "popular": true,
+    "icon": "📦"
+  },
+  {
+    "code": "ms",
+    "name": "Microsoft",
+    "category": "services",
+    "popular": false,
+    "icon": "💻"
+  },
+  {
+    "code": "ap",
+    "name": "Apple",
+    "category": "services",
+    "popular": false,
+    "icon": "🍎"
+  },
+  {
+    "code": "li",
+    "name": "LinkedIn",
+    "category": "social",
+    "popular": false,
+    "icon": "💼"
+  },
+  {
+    "code": "sc",
+    "name": "Snapchat",
+    "category": "social",
+    "popular": false,
+    "icon": "👻"
+  },
+  {
+    "code": "pi",
+    "name": "Pinterest",
+    "category": "social",
+    "popular": false,
+    "icon": "📌"
+  },
+  {
+    "code": "re",
+    "name": "Reddit",
+    "category": "social",
+    "popular": false,
+    "icon": "🔗"
+  },
+  {
+    "code": "tw",
+    "name": "Twitch",
+    "category": "entertainment",
+    "popular": false,
+    "icon": "🎮"
+  },
+  {
+    "code": "si",
+    "name": "Signal",
+    "category": "messaging",
+    "popular": false,
+    "icon": "🔒"
+  },
+  {
+    "code": "we",
+    "name": "WeChat",
+    "category": "messaging",
+    "popular": false,
+    "icon": "💭"
+  },
+  {
+    "code": "ln",
+    "name": "Line",
+    "category": "messaging",
+    "popular": false,
+    "icon": "📱"
+  },
+  {
+    "code": "sk",
+    "name": "Skype",
+    "category": "messaging",
+    "popular": false,
+    "icon": "📞"
+  },
+  {
+    "code": "zm",
+    "name": "Zoom",
+    "category": "services",
+    "popular": false,
+    "icon": "📹"
+  },
+  {
+    "code": "sp",
+    "name": "Spotify",
+    "category": "entertainment",
+    "popular": false,
+    "icon": "🎧"
+  },
+  {
+    "code": "yt",
+    "name": "YouTube",
+    "category": "entertainment",
+    "popular": false,
+    "icon": "📺"
+  }
+]

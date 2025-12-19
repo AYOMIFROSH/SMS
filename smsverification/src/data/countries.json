@@ -1,0 +1,1162 @@
+[
+  {
+    "code": "0",
+    "name": "Russia",
+    "rus": "Россия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "1",
+    "name": "Ukraine",
+    "rus": "Украина",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "2",
+    "name": "Kazakhstan",
+    "rus": "Казахстан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "3",
+    "name": "China",
+    "rus": "Китай",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "4",
+    "name": "Philippines",
+    "rus": "Филиппины",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "5",
+    "name": "Myanmar",
+    "rus": "Мьянма",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "6",
+    "name": "Indonesia",
+    "rus": "Индонезия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "7",
+    "name": "Malaysia",
+    "rus": "Малайзия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "8",
+    "name": "Kenya",
+    "rus": "Кения",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "9",
+    "name": "Tanzania",
+    "rus": "Танзания",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "10",
+    "name": "Vietnam",
+    "rus": "Вьетнам",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "11",
+    "name": "Kyrgyzstan",
+    "rus": "Киргизия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "12",
+    "name": "USA (Virtual)",
+    "rus": "США (Виртуальные)",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "13",
+    "name": "Israel",
+    "rus": "Израиль",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "14",
+    "name": "Hong Kong",
+    "rus": "Гонконг",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "15",
+    "name": "Poland",
+    "rus": "Польша",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "16",
+    "name": "United Kingdom",
+    "rus": "Великобритания",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "17",
+    "name": "Madagascar",
+    "rus": "Мадагаскар",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "18",
+    "name": "Democratic Republic of the Congo",
+    "rus": "Конго (Дем. Респ.)",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "19",
+    "name": "Nigeria",
+    "rus": "Нигерия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "20",
+    "name": "Macau",
+    "rus": "Макао",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "21",
+    "name": "Egypt",
+    "rus": "Египет",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "22",
+    "name": "India",
+    "rus": "Индия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "23",
+    "name": "Ireland",
+    "rus": "Ирландия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "24",
+    "name": "Cambodia",
+    "rus": "Камбоджа",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "25",
+    "name": "Laos",
+    "rus": "Лаос",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "26",
+    "name": "Haiti",
+    "rus": "Гаити",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "27",
+    "name": "Ivory Coast",
+    "rus": "Кот-д'Ивуар",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "28",
+    "name": "Gambia",
+    "rus": "Гамбия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "29",
+    "name": "Serbia",
+    "rus": "Сербия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "30",
+    "name": "Yemen",
+    "rus": "Йемен",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "31",
+    "name": "South Africa",
+    "rus": "ЮАР",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "32",
+    "name": "Romania",
+    "rus": "Румыния",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "33",
+    "name": "Colombia",
+    "rus": "Колумбия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "34",
+    "name": "Estonia",
+    "rus": "Эстония",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "35",
+    "name": "Azerbaijan",
+    "rus": "Азербайджан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "36",
+    "name": "Canada",
+    "rus": "Канада",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "37",
+    "name": "Morocco",
+    "rus": "Марокко",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "38",
+    "name": "Ghana",
+    "rus": "Гана",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "39",
+    "name": "Argentina",
+    "rus": "Аргентина",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "40",
+    "name": "Uzbekistan",
+    "rus": "Узбекистан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "41",
+    "name": "Cameroon",
+    "rus": "Камерун",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "42",
+    "name": "Chad",
+    "rus": "Чад",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "43",
+    "name": "Germany",
+    "rus": "Германия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "44",
+    "name": "Lithuania",
+    "rus": "Литва",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "45",
+    "name": "Croatia",
+    "rus": "Хорватия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "46",
+    "name": "Sweden",
+    "rus": "Швеция",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "47",
+    "name": "Iraq",
+    "rus": "Ирак",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "48",
+    "name": "Netherlands",
+    "rus": "Нидерланды",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "49",
+    "name": "Latvia",
+    "rus": "Латвия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "50",
+    "name": "Austria",
+    "rus": "Австрия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "51",
+    "name": "Belarus",
+    "rus": "Беларусь",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "52",
+    "name": "Thailand",
+    "rus": "Таиланд",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "53",
+    "name": "Saudi Arabia",
+    "rus": "Саудовская Аравия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "54",
+    "name": "Mexico",
+    "rus": "Мексика",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "55",
+    "name": "Taiwan",
+    "rus": "Тайвань",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "56",
+    "name": "Spain",
+    "rus": "Испания",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "57",
+    "name": "Iran",
+    "rus": "Иран",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "58",
+    "name": "Algeria",
+    "rus": "Алжир",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "59",
+    "name": "Slovenia",
+    "rus": "Словения",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "60",
+    "name": "Bangladesh",
+    "rus": "Бангладеш",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "61",
+    "name": "Senegal",
+    "rus": "Сенегал",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "62",
+    "name": "Turkey",
+    "rus": "Турция",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "63",
+    "name": "Czech Republic",
+    "rus": "Чехия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "64",
+    "name": "Sri Lanka",
+    "rus": "Шри-Ланка",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "65",
+    "name": "Peru",
+    "rus": "Перу",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "66",
+    "name": "Pakistan",
+    "rus": "Пакистан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "67",
+    "name": "New Zealand",
+    "rus": "Новая Зеландия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "68",
+    "name": "Guinea",
+    "rus": "Гвинея",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "69",
+    "name": "Mali",
+    "rus": "Мали",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "70",
+    "name": "Venezuela",
+    "rus": "Венесуэла",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "71",
+    "name": "Ethiopia",
+    "rus": "Эфиопия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "72",
+    "name": "Mongolia",
+    "rus": "Монголия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "73",
+    "name": "Brazil",
+    "rus": "Бразилия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "74",
+    "name": "Afghanistan",
+    "rus": "Афганистан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "75",
+    "name": "Uganda",
+    "rus": "Уганда",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "76",
+    "name": "Angola",
+    "rus": "Ангола",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "77",
+    "name": "Cyprus",
+    "rus": "Кипр",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "78",
+    "name": "France",
+    "rus": "Франция",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "79",
+    "name": "Papua New Guinea",
+    "rus": "Папуа-Новая Гвинея",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "80",
+    "name": "Mozambique",
+    "rus": "Мозамбик",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "81",
+    "name": "Nepal",
+    "rus": "Непал",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "82",
+    "name": "Belgium",
+    "rus": "Бельгия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "83",
+    "name": "Bulgaria",
+    "rus": "Болгария",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "84",
+    "name": "Hungary",
+    "rus": "Венгрия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "85",
+    "name": "Moldova",
+    "rus": "Молдова",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "86",
+    "name": "Italy",
+    "rus": "Италия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "87",
+    "name": "Paraguay",
+    "rus": "Парагвай",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "88",
+    "name": "Honduras",
+    "rus": "Гондурас",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "89",
+    "name": "Tunisia",
+    "rus": "Тунис",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "90",
+    "name": "Nicaragua",
+    "rus": "Никарагуа",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "91",
+    "name": "Timor-Leste",
+    "rus": "Тимор-Лесте",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "92",
+    "name": "Bolivia",
+    "rus": "Боливия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "93",
+    "name": "Costa Rica",
+    "rus": "Коста-Рика",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "94",
+    "name": "Guatemala",
+    "rus": "Гватемала",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "95",
+    "name": "United Arab Emirates",
+    "rus": "ОАЭ",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "96",
+    "name": "Zimbabwe",
+    "rus": "Зимбабве",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "97",
+    "name": "Puerto Rico",
+    "rus": "Пуэрто-Рико",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "98",
+    "name": "Sudan",
+    "rus": "Судан",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "99",
+    "name": "Togo",
+    "rus": "Того",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "100",
+    "name": "Kuwait",
+    "rus": "Кувейт",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "101",
+    "name": "El Salvador",
+    "rus": "Сальвадор",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "102",
+    "name": "Liberia",
+    "rus": "Либерия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "103",
+    "name": "Jamaica",
+    "rus": "Ямайка",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "104",
+    "name": "Trinidad and Tobago",
+    "rus": "Тринидад и Tobago",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "105",
+    "name": "Ecuador",
+    "rus": "Эквадор",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "106",
+    "name": "Eswatini",
+    "rus": "Свазиленд",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "107",
+    "name": "Oman",
+    "rus": "Оман",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "108",
+    "name": "Bosnia and Herzegovina",
+    "rus": "Босния и Герцеговина",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "109",
+    "name": "Dominican Republic",
+    "rus": "Доминиканская Респ.",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "110",
+    "name": "Syria",
+    "rus": "Сирия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "111",
+    "name": "Antigua and Barbuda",
+    "rus": "Антигуа и Барбуда",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "112",
+    "name": "Panama",
+    "rus": "Панама",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "113",
+    "name": "Mauritius",
+    "rus": "Маврикий",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "114",
+    "name": "Sierra Leone",
+    "rus": "Сьерра-Леоне",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "115",
+    "name": "Jordan",
+    "rus": "Иордания",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "116",
+    "name": "Portugal",
+    "rus": "Португалия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "117",
+    "name": "Barbados",
+    "rus": "Барбадос",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "118",
+    "name": "Burundi",
+    "rus": "Бурунди",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "119",
+    "name": "Benin",
+    "rus": "Бенин",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "120",
+    "name": "Brunei",
+    "rus": "Бруней",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "121",
+    "name": "Bahamas",
+    "rus": "Багамы",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "122",
+    "name": "Botswana",
+    "rus": "Ботсвана",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "123",
+    "name": "Belize",
+    "rus": "Белиз",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "124",
+    "name": "Central African Republic",
+    "rus": "ЦАР",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "125",
+    "name": "Dominica",
+    "rus": "Доминика",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "126",
+    "name": "Grenada",
+    "rus": "Гренада",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "127",
+    "name": "Georgia",
+    "rus": "Грузия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "128",
+    "name": "Greece",
+    "rus": "Греция",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "129",
+    "name": "Guyana",
+    "rus": "Гайана",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "130",
+    "name": "Guadeloupe",
+    "rus": "Гваделупа",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "131",
+    "name": "Luxembourg",
+    "rus": "Люксембург",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "132",
+    "name": "Mauritania",
+    "rus": "Мавритания",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "133",
+    "name": "Martinique",
+    "rus": "Мартиника",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "134",
+    "name": "Montserrat",
+    "rus": "Монтсеррат",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "135",
+    "name": "Malawi",
+    "rus": "Малави",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "136",
+    "name": "Namibia",
+    "rus": "Намибия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "137",
+    "name": "Niger",
+    "rus": "Нигер",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "138",
+    "name": "Rwanda",
+    "rus": "Руанда",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "139",
+    "name": "Slovakia",
+    "rus": "Словакия",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "140",
+    "name": "Suriname",
+    "rus": "Суринам",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "141",
+    "name": "Turks and Caicos",
+    "rus": "Тёркс и Кайкос",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "142",
+    "name": "Chad",
+    "rus": "Чад",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "143",
+    "name": "Chile",
+    "rus": "Чили",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  },
+  {
+    "code": "144",
+    "name": "Burkina Faso",
+    "rus": "Буркина-Фасо",
+    "visible": true,
+    "retry": 0,
+    "rent": false
+  }
+]
