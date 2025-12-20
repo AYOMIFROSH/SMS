@@ -5,7 +5,6 @@ const { getPool } = require('../Config/database');
 const smsActivateService = require('../services/smsActivateServices');
 const webSocketService = require('../services/webhookService');
 const {
-  rateLimiters,
   validationRules,
   handleValidationErrors,
 } = require('../middleware/security');
@@ -13,11 +12,7 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
-// Apply rate limiting
-router.use(rateLimiters.sms);
-
-// UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
-// UPDATED: Enhanced number purchase with 100% BONUS SYSTEM
+// NO RATE LIMITING - Removed rateLimiters
 
 let cooldownMs = 45000;
 
@@ -32,10 +27,15 @@ router.post('/purchase',
       .matches(/^[0-9]+$/)
       .withMessage('Country code must be numeric'),
     require('express-validator').body('operator')
-      .optional()
+      .optional({ nullable: true, checkFalsy: true })
       .trim()
-      .matches(/^[a-zA-Z0-9_-]+$/)
-      .withMessage('Invalid operator format'),
+      .custom((value) => {
+        if (!value) return true;
+        if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
+          throw new Error('Invalid operator format');
+        }
+        return true;
+      }),
     require('express-validator').body('maxPrice')
       .optional()
       .isFloat({ min: 0, max: 100 })
@@ -344,7 +344,7 @@ router.post('/purchase',
         });
       } else if (error.message.includes('Rate limit exceeded')) {
         return res.status(429).json({
-          error: `Our provider is getting the best number for you. Please try again in ${Math.ceil(cooldownMs/1000)} seconds.`,
+          error: `Our provider is getting the best number for you. Please try again in ${Math.ceil(cooldownMs / 1000)} seconds.`,
           code: 'RATE_LIMIT_EXCEEDED'
         });
       }
@@ -566,137 +566,6 @@ router.get('/:id/status',
     }
   }
 );
-
-// // Enhanced cancel number with proper status handling
-// router.post('/:id/cancel',
-//   authenticateToken,
-//   [
-//     require('express-validator').param('id')
-//       .isInt({ min: 1 })
-//       .withMessage('Invalid number ID')
-//   ],
-//   handleValidationErrors,
-//   async (req, res) => {
-//     const { id } = req.params;
-//     const userId = req.user.id;
-
-//     try {
-//       const pool = getPool();
-
-//       // Get number details
-//       const [numbers] = await pool.execute(
-//         'SELECT * FROM number_purchases WHERE id = ? AND user_id = ?',
-//         [id, userId]
-//       );
-
-//       if (numbers.length === 0) {
-//         return res.status(404).json({
-//           error: 'Number not found',
-//           code: 'NUMBER_NOT_FOUND'
-//         });
-//       }
-
-//       const number = numbers[0];
-
-//       if (!['waiting', 'received'].includes(number.status)) {
-//         return res.status(400).json({
-//           error: 'Number cannot be cancelled in current status',
-//           code: 'INVALID_STATUS_FOR_CANCEL',
-//           currentStatus: number.status
-//         });
-//       }
-
-//       // Start transaction
-//       await pool.execute('START TRANSACTION');
-
-//       try {
-//         // Cancel via SMS-Activate API
-//         if (number.activation_id) {
-//           await smsActivateService.setStatus(
-//             number.activation_id,
-//             smsActivateService.getActionCode('CANCEL_ACTIVATION')
-//           );
-//         }
-
-//         // Update database
-//         await pool.execute(
-//           'UPDATE number_purchases SET status = ?, updated_at = NOW() WHERE id = ?',
-//           ['cancelled', id]
-//         );
-
-//         // Calculate refund (partial refund logic - user gets refund of total amount paid)
-//         const refundAmount = calculateRefund(number);
-//         if (refundAmount > 0) {
-//           // Update balance
-//           await pool.execute(
-//             `UPDATE user_demo_balances 
-//              SET balance = balance + ?,
-//                  last_transaction_at = NOW()
-//              WHERE user_id = ?`,
-//             [refundAmount, userId]
-//           );
-
-//           // Add refund transaction
-//           await pool.execute(
-//             `INSERT INTO transactions 
-//              (user_id, transaction_type, amount, reference_id, description, status, created_at)
-//              VALUES (?, 'refund', ?, ?, ?, 'completed', NOW())`,
-//             [
-//               userId,
-//               refundAmount,
-//               number.activation_id,
-//               `Partial refund for cancelled number ${number.phone_number}`
-//             ]
-//           );
-//         }
-
-//         await pool.execute('COMMIT');
-
-//         // Send WebSocket notification
-//         webSocketService.sendToUser(userId, {
-//           type: 'number_cancelled',
-//           data: {
-//             activationId: number.activation_id,
-//             phoneNumber: number.phone_number,
-//             refundAmount
-//           }
-//         });
-
-//         if (refundAmount > 0) {
-//           const [newBalance] = await pool.execute(
-//             'SELECT balance FROM user_demo_balances WHERE user_id = ?',
-//             [userId]
-//           );
-
-//           webSocketService.notifyBalanceUpdated(userId, newBalance[0].balance, refundAmount);
-//         }
-
-//         logger.info('✅ Number cancelled successfully:', {
-//           userId,
-//           activationId: number.activation_id,
-//           refundAmount
-//         });
-
-//         res.json({
-//           success: true,
-//           message: 'Number cancelled successfully',
-//           refundAmount: refundAmount
-//         });
-
-//       } catch (cancelError) {
-//         await pool.execute('ROLLBACK');
-//         throw cancelError;
-//       }
-
-//     } catch (error) {
-//       logger.error('❌ Cancel error:', error);
-//       res.status(500).json({
-//         error: 'Failed to cancel number',
-//         message: error.message
-//       });
-//     }
-//   }
-// );
 
 // Enhanced cancel number with proper refund to user balance
 router.post('/:id/cancel',
@@ -1108,18 +977,17 @@ router.get('/history',
       .optional()
       .isInt({ min: 1, max: 100 })
       .withMessage('Limit must be 1-100'),
-    // Simpler fix - just allow empty strings in validation
     require('express-validator').query('service')
-      .optional({ nullable: true, checkFalsy: true }) // This allows empty strings
-      .matches(/^[a-zA-Z0-9_-]*$/)  // Note the * instead of + to allow empty
+      .optional({ nullable: true, checkFalsy: true })
+      .matches(/^[a-zA-Z0-9_-]*$/)
       .withMessage('Invalid service format'),
     require('express-validator').query('country')
       .optional({ nullable: true, checkFalsy: true })
-      .matches(/^[0-9]*$/)  // Allow empty
+      .matches(/^[0-9]*$/)
       .withMessage('Country must be numeric'),
     require('express-validator').query('status')
       .optional({ nullable: true, checkFalsy: true })
-      .isIn(['', 'waiting', 'received', 'cancelled', 'expired', 'used']) // Include empty string
+      .isIn(['', 'waiting', 'received', 'cancelled', 'expired', 'used'])
       .withMessage('Invalid status'),
     require('express-validator').query('dateFrom')
       .optional()
@@ -1143,7 +1011,6 @@ router.get('/history',
       sortBy = 'purchase_date',
       sortOrder = 'DESC'
     } = req.query;
-
     const userId = req.user.id;
     const offset = (page - 1) * limit;
 
@@ -1152,15 +1019,15 @@ router.get('/history',
 
       // Build dynamic query
       let query = `
-        SELECT np.*, 
-               CASE 
-                 WHEN np.status = 'received' OR np.status = 'used' THEN 'success'
-                 WHEN np.status = 'cancelled' OR np.status = 'expired' THEN 'failed'
-                 ELSE 'pending'
-               END as result_status
-        FROM number_purchases np
-        WHERE np.user_id = ?
-      `;
+    SELECT np.*, 
+           CASE 
+             WHEN np.status = 'received' OR np.status = 'used' THEN 'success'
+             WHEN np.status = 'cancelled' OR np.status = 'expired' THEN 'failed'
+             ELSE 'pending'
+           END as result_status
+    FROM number_purchases np
+    WHERE np.user_id = ?
+  `;
 
       const params = [userId];
 
@@ -1225,22 +1092,22 @@ router.get('/history',
 
       // Get statistics for the filtered data
       const [stats] = await pool.execute(`
-        SELECT 
-          COUNT(*) as total_purchases,
-          SUM(CASE WHEN status IN ('received', 'used') THEN 1 ELSE 0 END) as successful,
-          SUM(CASE WHEN status IN ('cancelled', 'expired') THEN 1 ELSE 0 END) as failed,
-          SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) as pending,
-          SUM(price) as total_spent,
-          AVG(price) as average_price,
-          MIN(price) as min_price,
-          MAX(price) as max_price
-        FROM number_purchases np 
-        WHERE np.user_id = ? ${service ? 'AND np.service_code = ?' : ''} 
-        ${country ? 'AND np.country_code = ?' : ''}
-        ${status ? 'AND np.status = ?' : ''}
-        ${dateFrom ? 'AND np.purchase_date >= ?' : ''}
-        ${dateTo ? 'AND np.purchase_date <= ?' : ''}
-      `, countParams);
+    SELECT 
+      COUNT(*) as total_purchases,
+      SUM(CASE WHEN status IN ('received', 'used') THEN 1 ELSE 0 END) as successful,
+      SUM(CASE WHEN status IN ('cancelled', 'expired') THEN 1 ELSE 0 END) as failed,
+      SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END) as pending,
+      SUM(price) as total_spent,
+      AVG(price) as average_price,
+      MIN(price) as min_price,
+      MAX(price) as max_price
+    FROM number_purchases np 
+    WHERE np.user_id = ? ${service ? 'AND np.service_code = ?' : ''} 
+    ${country ? 'AND np.country_code = ?' : ''}
+    ${status ? 'AND np.status = ?' : ''}
+    ${dateFrom ? 'AND np.purchase_date >= ?' : ''}
+    ${dateTo ? 'AND np.purchase_date <= ?' : ''}
+  `, countParams);
 
       res.json({
         success: true,
@@ -1285,9 +1152,7 @@ router.get('/history',
     }
   }
 );
-
 // NEW: Subscription management routes
-
 // Buy subscription
 router.post('/subscriptions/buy',
   authenticateToken,
@@ -1307,7 +1172,6 @@ router.post('/subscriptions/buy',
   async (req, res) => {
     const { service, country, period } = req.body;
     const userId = req.user.id;
-
     try {
       logger.info('💳 Subscription purchase request:', { userId, service, country, period });
 
@@ -1356,22 +1220,22 @@ router.post('/subscriptions/buy',
 
         // Create subscription table if not exists
         await pool.execute(`
-          CREATE TABLE IF NOT EXISTS subscriptions (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            user_id INT NOT NULL,
-            subscription_id VARCHAR(100) UNIQUE,
-            service_code VARCHAR(50),
-            country_code VARCHAR(5),
-            period_days INT,
-            price DECIMAL(10, 4),
-            status ENUM('active', 'cancelled', 'expired') DEFAULT 'active',
-            start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            end_date TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_user_subscriptions (user_id, status),
-            INDEX idx_subscription_id (subscription_id)
-          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        `);
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        subscription_id VARCHAR(100) UNIQUE,
+        service_code VARCHAR(50),
+        country_code VARCHAR(5),
+        period_days INT,
+        price DECIMAL(10, 4),
+        status ENUM('active', 'cancelled', 'expired') DEFAULT 'active',
+        start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        end_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_subscriptions (user_id, status),
+        INDEX idx_subscription_id (subscription_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
 
         // Calculate end date
         const endDate = new Date();
@@ -1380,8 +1244,8 @@ router.post('/subscriptions/buy',
         // Save subscription to database
         const [subscriptionInsert] = await pool.execute(
           `INSERT INTO subscriptions 
-           (user_id, subscription_id, service_code, country_code, period_days, price, end_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (user_id, subscription_id, service_code, country_code, period_days, price, end_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             userId,
             subscriptionResult.subscriptionId,
@@ -1396,18 +1260,18 @@ router.post('/subscriptions/buy',
         // Deduct balance
         await pool.execute(
           `UPDATE user_demo_balances 
-           SET balance = balance - ?,
-               total_spent = total_spent + ?,
-               last_transaction_at = NOW()
-           WHERE user_id = ?`,
+       SET balance = balance - ?,
+           total_spent = total_spent + ?,
+           last_transaction_at = NOW()
+       WHERE user_id = ?`,
           [subscriptionPrice, subscriptionPrice, userId]
         );
 
         // Add transaction record
         await pool.execute(
           `INSERT INTO transactions 
-           (user_id, transaction_type, amount, reference_id, description, status, created_at)
-           VALUES (?, 'purchase', ?, ?, ?, 'completed', NOW())`,
+       (user_id, transaction_type, amount, reference_id, description, status, created_at)
+       VALUES (?, 'purchase', ?, ?, ?, 'completed', NOW())`,
           [
             userId,
             subscriptionPrice,
@@ -1456,7 +1320,6 @@ router.post('/subscriptions/buy',
     }
   }
 );
-
 // Get user subscriptions
 router.get('/subscriptions',
   authenticateToken,
@@ -1479,7 +1342,6 @@ router.get('/subscriptions',
     const { page = 1, limit = 20, status } = req.query;
     const userId = req.user.id;
     const offset = (page - 1) * limit;
-
     try {
       const pool = getPool();
 
@@ -1545,39 +1407,27 @@ router.get('/subscriptions',
     }
   }
 );
-
-
 // Helper methods
 function calculateTimeRemaining(expiryDate) {
   if (!expiryDate) return 0;
-
   const now = new Date();
   const expiry = new Date(expiryDate);
   const diff = expiry.getTime() - now.getTime();
-
   return Math.max(0, Math.floor(diff / 1000)); // Return seconds
 }
-
 function calculateDaysRemaining(endDate) {
   if (!endDate) return 0;
-
   const now = new Date();
   const end = new Date(endDate);
   const diff = end.getTime() - now.getTime();
-
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24))); // Return days
 }
-
 function calculateRefund(number) {
   if (!number || !number.purchase_date || !number.price) return 0;
-
   const totalLifetime = 20 * 60 * 1000; // 20 minutes in ms
   const elapsed = Date.now() - new Date(number.purchase_date).getTime();
-
   if (elapsed >= totalLifetime) return 0; // No refund if time elapsed
-
   const remainingFraction = (totalLifetime - elapsed) / totalLifetime;
   return parseFloat((number.price * remainingFraction * 0.5).toFixed(4)); // 50% refund rate
 }
-
 module.exports = router;

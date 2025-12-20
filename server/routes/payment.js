@@ -141,7 +141,7 @@ router.post('/calculate-usd',
 
 // POST /api/payments/create-deposit - Create new deposit
 router.post('/create-deposit',
-  rateLimiters.sms,
+  rateLimiters.api,
   authenticateToken,
   createDepositValidation,
   handleValidationErrors,
@@ -425,7 +425,7 @@ router.get('/balance',
 
 // POST /api/payments/verify/:txRef - Manually verify payment
 router.post('/verify/:txRef',
-  rateLimiters.sms,
+  rateLimiters.api,
   authenticateToken,
   verifyPaymentValidation,
   handleValidationErrors,

@@ -65,29 +65,7 @@ const rateLimiters = {
     }
   }),
 
-  // SMS operations - conservative limits
-  sms: rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 10, // 10 SMS operations per minute
-    message: {
-      success: false,
-      error: 'SMS operation rate limit exceeded',
-      code: 'SMS_RATE_LIMIT'
-    },
-    keyGenerator: (req) => `sms:${req.user?.id || req.ip}`,
-    handler: (req, res) => {
-      logger.warn('SMS rate limit exceeded:', {
-        ip: req.ip,
-        userId: req.user?.id,
-        path: req.path
-      });
-      res.status(429).json({
-        success: false,
-        error: 'SMS operation rate limit exceeded',
-        code: 'SMS_RATE_LIMIT'
-      });
-    }
-  })
+  
 };
 
 // Input validation rules

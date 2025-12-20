@@ -197,16 +197,6 @@ app.get('/api/health', async (req, res) => {
   try {
     const sessionStats = await sessionService.getSessionStats();
 
-    // Get pending settlements count (optional)
-    let pendingSettlements = 0;
-    try {
-      const flutterwaveService = require('./services/flutterwaveServices');
-      const monitor = await flutterwaveService.monitorPendingSettlements();
-      pendingSettlements = monitor.total_pending;
-    } catch (monitorError) {
-      logger.warn('Pending settlements monitoring failed:', monitorError);
-    }
-
     res.json({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -220,16 +210,7 @@ app.get('/api/health', async (req, res) => {
       database: { connected: true },
       redis: { connected: getRedisClient()?.isOpen || false },
       sessions: sessionStats,
-      flutterwave: {
-        checked: false,
-        note: "Use /api/flutterwave/health to check provider status"
-      },
-      payment_system: {
-        provider: 'flutterwave',
-        webhook_endpoint: '/api/payments/flutterwave',
-        pending_settlements: pendingSettlements,
-        monitoring_enabled: true
-      },
+      
       requestId: req.requestId
     });
   } catch (error) {
@@ -238,25 +219,6 @@ app.get('/api/health', async (req, res) => {
       status: 'ERROR',
       error: error.message,
       requestId: req.requestId
-    });
-  }
-});
-
-app.get('/api/flutterwave/health', async (req, res) => {
-  try {
-    const flutterwaveService = require('./services/flutterwaveServices');
-    const health = await flutterwaveService.healthCheck();
-
-    res.json({
-      service: 'flutterwave',
-      ...health
-    });
-  } catch (error) {
-    logger.error('Flutterwave health check error:', error);
-    res.status(503).json({
-      service: 'flutterwave',
-      healthy: false,
-      error: error.message
     });
   }
 });

@@ -2,7 +2,6 @@
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
-const { getPool } = require('../Config/database');
 
 class WebSocketService {
   constructor() {
