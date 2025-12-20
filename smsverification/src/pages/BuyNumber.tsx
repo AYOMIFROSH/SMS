@@ -16,7 +16,7 @@ import CountrySelector from '@/components/services/CountrySelector';
 import PriceDisplay from '@/components/services/PriceDisplay';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import toast from 'react-hot-toast';
-import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Clock} from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, ArrowLeft, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const BuyNumber: React.FC = () => {
@@ -82,21 +82,16 @@ const BuyNumber: React.FC = () => {
     }
   }, [rateLimitInfo]);
 
-  // OPTIMIZED: No initial data fetch needed - using static JSON
-  useEffect(() => {
-    console.log('✅ Using static countries and services - 0 API calls');
-  }, []);
-
   // OPTIMIZED: Only fetch prices when user reaches confirmation step
   useEffect(() => {
     if (selectedCountry && selectedService && step === 'confirm') {
       // Check if we already have cached prices
       if (!prices[selectedCountry]?.[selectedService]) {
         console.log('💲 Fetching prices for purchase confirmation');
-        
+
         const timer = setTimeout(() => {
-          dispatch(fetchPrices({ 
-            country: selectedCountry, 
+          dispatch(fetchPrices({
+            country: selectedCountry,
             service: selectedService,
             forceRefresh: false // Use cache if available
           }))
@@ -165,11 +160,9 @@ const BuyNumber: React.FC = () => {
       const purchaseData = {
         service: selectedService,
         country: selectedCountry,
-        operator: '', // ALWAYS "Any Operator" (empty string)
+        operator: undefined, // ✅ Send undefined instead of empty string
         maxPrice: maxPrice || undefined
       };
-
-      console.log('🛒 Purchasing number with "Any Operator":', purchaseData);
 
       await dispatch(purchaseNumber(purchaseData)).unwrap();
 
@@ -248,8 +241,8 @@ const BuyNumber: React.FC = () => {
     payment.refreshBalance();
     dispatch(invalidatePriceCache()); // Clear price cache
     if (selectedCountry && selectedService) {
-      dispatch(fetchPrices({ 
-        country: selectedCountry, 
+      dispatch(fetchPrices({
+        country: selectedCountry,
         service: selectedService,
         forceRefresh: true // Force fresh data
       }))
@@ -511,7 +504,7 @@ const BuyNumber: React.FC = () => {
           />
         </div>
 
-        
+
       </div>
 
       {/* Content Container */}
