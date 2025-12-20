@@ -252,7 +252,7 @@ const BuyNumber: React.FC = () => {
             setRateLimitInfo({
               active: true,
               message: "Provider rate limit reached. Please wait:",
-              countdown: 30
+              countdown: 60
             });
           }
         });
