@@ -1,4 +1,4 @@
-// routes/numbers.js - ENHANCED WITH 100% BONUS SYSTEM - COMPLETE VERSION
+// routes/numbers.js - FIXED: Use cached prices, don't re-fetch during purchase
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { getPool } = require('../Config/database');
@@ -11,10 +11,6 @@ const {
 const logger = require('../utils/logger');
 
 const router = express.Router();
-
-// NO RATE LIMITING - Removed rateLimiters
-
-let cooldownMs = 45000;
 
 router.post('/purchase',
   authenticateToken,
@@ -55,40 +51,36 @@ router.post('/purchase',
         maxPrice
       });
 
-      // Get current price for the service from SMS-Activate API
-      const prices = await smsActivateService.getPrices(country, service);
+      // ✅ CRITICAL FIX: Get prices from Redis cache ONLY - don't call API again
+      const cacheService = require('../services/cacheServices');
+      const cacheKey = cacheService.getCacheKey('prices', country, service);
+      const cachedPrices = await cacheService.get(cacheKey);
+
       let realPrice = 0;
 
-      // CRITICAL FIX: Use the correct pricing from freePriceMap, not the misleading "cost" field
-      if (prices?.[country]?.[service]) {
-        const serviceData = prices[country][service];
-
-        // Check if freePriceMap exists (this contains actual prices)
-        if (serviceData.realPrice !== undefined) {
-          realPrice = parseFloat(serviceData.realPrice);
-          console.log('Using processed realPrice:', realPrice);
-        } else if (serviceData.freePriceMap && Object.keys(serviceData.freePriceMap).length > 0) {
-          // Direct extraction if not processed yet
-          const allPrices = Object.keys(serviceData.freePriceMap)
-            .map(priceKey => parseFloat(priceKey))
-            .filter(price => !isNaN(price))
-            .sort((a, b) => a - b);
-
-          realPrice = allPrices[0]; // Use the actual price, not the misleading "cost"
-
-          logger.info('💰 Using ACTUAL price from freePriceMap:', {
-            misleadingCost: serviceData.cost,
-            actualPrice: realPrice,
-            service,
-            country
-          });
-        } else {
-          // Fallback to cost field if freePriceMap is not available
-          realPrice = parseFloat(serviceData.cost || 0);
-          logger.warn('⚠️ No freePriceMap found, using cost field (might be inaccurate):', {
-            cost: realPrice,
-            service,
-            country
+      if (cachedPrices && cachedPrices[country] && cachedPrices[country][service]) {
+        const serviceData = cachedPrices[country][service];
+        realPrice = parseFloat(serviceData.realPrice || serviceData.cost || 0);
+        logger.info('💾 Using cached price for purchase (no API call):', {
+          realPrice,
+          service,
+          country
+        });
+      } else {
+        // Fallback: Try to get from API (but this should rarely happen)
+        logger.warn('⚠️ No cached price found, attempting API call (slow)');
+        try {
+          const prices = await smsActivateService.getPrices(country, service);
+          
+          if (prices && prices[country] && prices[country][service]) {
+            const serviceData = prices[country][service];
+            realPrice = parseFloat(serviceData.realPrice || serviceData.cost || 0);
+          }
+        } catch (priceError) {
+          logger.error('❌ Failed to get price:', priceError);
+          return res.status(400).json({
+            error: 'Unable to determine price for this service. Please try again.',
+            code: 'PRICE_UNAVAILABLE'
           });
         }
       }
@@ -101,10 +93,10 @@ router.post('/purchase',
       }
 
       // BONUS SYSTEM: Calculate total price (real price + 100% bonus)
-      const bonusAmount = realPrice; // 100% bonus = same as real price
-      const totalPrice = realPrice + bonusAmount; // User pays double
+      const bonusAmount = realPrice;
+      const totalPrice = realPrice + bonusAmount;
 
-      logger.info('💰 Corrected price calculation with bonus:', {
+      logger.info('💰 Price calculation with bonus:', {
         userId,
         realPrice,
         bonusAmount,
@@ -125,10 +117,9 @@ router.post('/purchase',
         });
       }
 
-      // Check user balance in user_demo_balances table
+      // Check user balance
       const pool = getPool();
 
-      // Get or create balance record
       await pool.execute(`
         INSERT IGNORE INTO user_demo_balances (user_id, balance, total_deposited, total_spent)
         VALUES (?, 0, 0, 0)
@@ -141,7 +132,6 @@ router.post('/purchase',
 
       const currentBalance = parseFloat(userBalance[0].balance || 0);
 
-      // CRITICAL: Check if user has enough balance for TOTAL price (real + bonus)
       if (currentBalance < totalPrice) {
         return res.status(400).json({
           error: 'Insufficient balance for purchase including bonus',
@@ -157,11 +147,11 @@ router.post('/purchase',
         });
       }
 
-      // Start database transaction for atomic operation
+      // Start database transaction
       await pool.execute('START TRANSACTION');
 
       try {
-        // STEP 1: Purchase number from SMS-Activate using REAL price only
+        // ✅ Purchase number from SMS-Activate (this is the ONLY API call)
         logger.info('🔄 Purchasing from SMS-Activate API with real price:', {
           userId,
           service,
@@ -178,11 +168,10 @@ router.post('/purchase',
 
         const { id: activationId, number } = numberData;
 
-        // Calculate expiry date (typically 20 minutes for SMS)
         const expiryDate = new Date();
         expiryDate.setMinutes(expiryDate.getMinutes() + 20);
 
-        // STEP 2: Save purchase to database with total price user paid
+        // Save purchase to database
         const [purchaseResult] = await pool.execute(
           `INSERT INTO number_purchases 
            (user_id, activation_id, phone_number, country_code, service_code, 
@@ -194,13 +183,13 @@ router.post('/purchase',
             number,
             country,
             service,
-            service.toUpperCase(), // Service name
-            totalPrice, // Store total price user paid (including bonus)
+            service.toUpperCase(),
+            totalPrice,
             expiryDate
           ]
         );
 
-        // STEP 3: Deduct TOTAL price from user balance (real + bonus)
+        // Deduct TOTAL price from user balance
         const [balanceUpdateResult] = await pool.execute(
           `UPDATE user_demo_balances 
            SET balance = balance - ?, 
@@ -214,7 +203,6 @@ router.post('/purchase',
           throw new Error('Failed to update user balance');
         }
 
-        // Get new balance for notifications
         const [newBalance] = await pool.execute(
           'SELECT balance FROM user_demo_balances WHERE user_id = ?',
           [userId]
@@ -222,7 +210,7 @@ router.post('/purchase',
 
         const remainingBalance = parseFloat(newBalance[0].balance);
 
-        // STEP 4: Add detailed transaction record
+        // Add transaction record
         await pool.execute(
           `INSERT INTO transactions 
            (user_id, transaction_type, amount, balance_before, balance_after, 
@@ -240,9 +228,8 @@ router.post('/purchase',
 
         await pool.execute('COMMIT');
 
-        // STEP 5: Send real-time WebSocket notifications
+        // Send WebSocket notifications
         try {
-          // Notify successful purchase
           webSocketService.sendToUser(userId, {
             type: 'number_purchased',
             data: {
@@ -260,9 +247,7 @@ router.post('/purchase',
             }
           });
 
-          // Notify balance update
           webSocketService.notifyBalanceUpdated(userId, remainingBalance, -totalPrice);
-
         } catch (wsError) {
           logger.warn('WebSocket notification failed (non-critical):', wsError.message);
         }
@@ -319,7 +304,7 @@ router.post('/purchase',
         stack: error.stack
       });
 
-      // Enhanced error handling with proper status codes
+      // Enhanced error handling
       if (error.message.includes('NO_NUMBERS') || error.message.includes('No numbers available')) {
         return res.status(400).json({
           error: `No numbers available for ${operator ? operator + ' operator in ' : ''}this service/country combination`,
@@ -342,14 +327,19 @@ router.post('/purchase',
           error: 'Invalid service code',
           code: 'INVALID_SERVICE'
         });
-      } else if (error.message.includes('Rate limit exceeded')) {
+      } else if (error.message.includes('Rate limit')) {
         return res.status(429).json({
-          error: `Our provider is getting the best number for you. Please try again in ${Math.ceil(cooldownMs / 1000)} seconds.`,
-          code: 'RATE_LIMIT_EXCEEDED'
+          error: 'Please wait 45 seconds before trying again',
+          code: 'RATE_LIMIT_EXCEEDED',
+          retryAfter: 45
+        });
+      } else if (error.code === 'EPROTO' || error.message.includes('SSL')) {
+        return res.status(503).json({
+          error: 'Connection issue with SMS provider. Please try again.',
+          code: 'CONNECTION_ERROR'
         });
       }
 
-      // Generic error - return 500 only for unexpected errors
       res.status(500).json({
         error: 'Failed to purchase number',
         code: 'PURCHASE_FAILED',
@@ -380,7 +370,7 @@ router.get('/active',
         [userId, parseInt(limit), offset]
       );
 
-      // Check for SMS updates for each active number
+      // Check for SMS updates
       const updatedNumbers = [];
       for (const number of numbers) {
         if (number.activation_id && number.status === 'waiting') {
@@ -388,7 +378,6 @@ router.get('/active',
             const statusResult = await smsActivateService.getStatus(number.activation_id);
 
             if (statusResult.code && number.sms_code !== statusResult.code) {
-              // Update database with new SMS
               await pool.execute(
                 `UPDATE number_purchases 
                  SET sms_code = ?, sms_text = ?, status = 'received', received_at = NOW()
@@ -401,7 +390,6 @@ router.get('/active',
               number.status = 'received';
               number.received_at = new Date();
 
-              // Send WebSocket notification
               webSocketService.sendToUser(userId, {
                 type: 'sms_received',
                 data: {
@@ -412,15 +400,8 @@ router.get('/active',
                   phoneNumber: number.phone_number
                 }
               });
-
-              logger.info('📨 SMS received:', {
-                userId,
-                activationId: number.activation_id,
-                code: statusResult.code
-              });
             }
 
-            // Check for expiry
             if (new Date() > new Date(number.expiry_date) && number.status === 'waiting') {
               await pool.execute(
                 'UPDATE number_purchases SET status = ? WHERE id = ?',
@@ -428,7 +409,6 @@ router.get('/active',
               );
               number.status = 'expired';
 
-              // Notify about expiry
               webSocketService.sendToUser(userId, {
                 type: 'number_expired',
                 data: {
@@ -438,7 +418,6 @@ router.get('/active',
                 }
               });
             }
-
           } catch (statusError) {
             logger.error('Status check error:', {
               error: statusError.message,
@@ -454,7 +433,6 @@ router.get('/active',
         });
       }
 
-      // Get total count
       const [countResult] = await pool.execute(
         'SELECT COUNT(*) as total FROM number_purchases WHERE user_id = ? AND status IN (?, ?)',
         [userId, 'waiting', 'received']
@@ -1415,19 +1393,12 @@ function calculateTimeRemaining(expiryDate) {
   const diff = expiry.getTime() - now.getTime();
   return Math.max(0, Math.floor(diff / 1000)); // Return seconds
 }
-function calculateDaysRemaining(endDate) {
-  if (!endDate) return 0;
+function calculateTimeRemaining(expiryDate) {
+  if (!expiryDate) return 0;
   const now = new Date();
-  const end = new Date(endDate);
-  const diff = end.getTime() - now.getTime();
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24))); // Return days
+  const expiry = new Date(expiryDate);
+  const diff = expiry.getTime() - now.getTime();
+  return Math.max(0, Math.floor(diff / 1000));
 }
-function calculateRefund(number) {
-  if (!number || !number.purchase_date || !number.price) return 0;
-  const totalLifetime = 20 * 60 * 1000; // 20 minutes in ms
-  const elapsed = Date.now() - new Date(number.purchase_date).getTime();
-  if (elapsed >= totalLifetime) return 0; // No refund if time elapsed
-  const remainingFraction = (totalLifetime - elapsed) / totalLifetime;
-  return parseFloat((number.price * remainingFraction * 0.5).toFixed(4)); // 50% refund rate
-}
+
 module.exports = router;

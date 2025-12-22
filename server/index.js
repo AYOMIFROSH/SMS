@@ -13,13 +13,11 @@ const path = require('path');
 const fs = require('fs');
 
 
-const { setupDatabase, initializeTables } = require('./Config/database');
 const { setupRedis, getRedisClient } = require('./Config/redis');
 const sessionService = require('./services/sessionService');
 const logger = require('./utils/logger');
 const webSocketService = require('./services/webhookService');
 const mobileOptimizationMiddleware = require('./middleware/mobile');
-const smsBackgroundService = require('./services/smsBackgroudService');
 
 const app = express();
 const server = http.createServer(app);
@@ -356,12 +354,6 @@ async function startServer() {
       throw new Error(errorMsg);
     }
 
-
-    // Setup database
-    await setupDatabase();
-    await initializeTables();
-    logger.info('✅ Database connected and initialized');
-
     try {
       const flutterwaveService = require('./services/flutterwaveServices');
       if (process.env.FLW_SECRET_KEY && process.env.FLW_PUBLIC_KEY && process.env.FLW_SECRET_HASH) {
@@ -390,15 +382,6 @@ async function startServer() {
     // Initialize WebSocket
     webSocketService.initialize(server);
     logger.info('✅ WebSocket service initialized');
-
-    // Start SMS Background Service
-    try {
-      smsBackgroundService.start();
-      logger.info('✅ SMS Background Service started successfully');
-    } catch (error) {
-      logger.error('❌ Failed to start SMS Background Service:', error);
-      console.error('⚠️ Warning: SMS real-time checking disabled due to startup error');
-    }
 
     // Start Reconciliation Cron Job
     try {
@@ -473,15 +456,6 @@ async function gracefulShutdown(signal) {
       clearInterval(settlementMonitorInterval);
       settlementMonitorInterval = null;
       logger.info('✅ Settlement monitoring interval cleared');
-    }
-
-    // 3. Stop SMS background service
-    try {
-      logger.info('⏹ Stopping SMS background service...');
-      await smsBackgroundService.stop();
-      logger.info('✅ SMS background service stopped');
-    } catch (error) {
-      logger.warn('⚠️ SMS background service shutdown error:', error.message);
     }
 
     // 4. Close WebSocket connections
