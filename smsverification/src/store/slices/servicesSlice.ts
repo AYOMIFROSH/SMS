@@ -1,4 +1,4 @@
-// src/store/slices/servicesSlice.ts - OPTIMIZED: Static data + removed operator calls
+// src/store/slices/servicesSlice.ts - OPTIMIZED: Aggressive caching to reduce API calls
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { servicesApi } from '@/api/services';
 import { Service, Country } from '@/types';
@@ -16,13 +16,19 @@ interface ServicesState {
   error: string | null;
   selectedCountry: string | null;
   selectedService: string | null;
-  // REMOVED: selectedOperator - always using "Any Operator"
-  lastPriceFetch: number | null; // Track last price fetch time
+  lastPriceFetch: number | null;
+  priceCache: {
+    [key: string]: {
+      data: any;
+      timestamp: number;
+      expiresAt: number;
+    };
+  };
 }
 
 const initialState: ServicesState = {
-  services: STATIC_SERVICES as Service[], // Load from static JSON
-  countries: STATIC_COUNTRIES as Country[], // Load from static JSON
+  services: STATIC_SERVICES as Service[],
+  countries: STATIC_COUNTRIES as Country[],
   prices: {},
   loading: false,
   pricesLoading: false,
@@ -30,13 +36,10 @@ const initialState: ServicesState = {
   selectedCountry: null,
   selectedService: null,
   lastPriceFetch: null,
+  priceCache: {}
 };
 
-// REMOVED: fetchServices thunk - using static data
-// REMOVED: fetchCountries thunk - using static data
-// REMOVED: fetchOperators thunk - always using "Any Operator"
-
-// Fetch prices - ONLY called on purchase confirmation with aggressive caching
+// Fetch prices with intelligent caching
 export const fetchPrices = createAsyncThunk(
   'services/fetchPrices',
   async ({ country, service, forceRefresh = false }: { 
@@ -46,22 +49,29 @@ export const fetchPrices = createAsyncThunk(
   }, { rejectWithValue, getState }) => {
     try {
       const state = getState() as { services: ServicesState };
-      const { lastPriceFetch, prices } = state.services;
+      const { priceCache } = state.services;
       
-      // Cache for 30 minutes (1800000ms) - don't refetch if recently fetched
-      const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+      // Create cache key
+      const cacheKey = `${country || 'all'}_${service || 'all'}`;
       const now = Date.now();
       
-      // Check if we have cached prices and they're still valid
-      if (!forceRefresh && lastPriceFetch && (now - lastPriceFetch) < CACHE_DURATION) {
-        const cachedPrice = country && service ? prices[country]?.[service] : null;
-        if (cachedPrice) {
-          console.log('✅ Using cached prices (< 30 min old)');
+      // Check cache validity (10 minutes for specific, 15 minutes for bulk)
+      const CACHE_DURATION = (country && service) ? 10 * 60 * 1000 : 15 * 60 * 1000;
+      
+      // Return cached data if valid and not forcing refresh
+      if (!forceRefresh && priceCache[cacheKey]) {
+        const cached = priceCache[cacheKey];
+        
+        if (now < cached.expiresAt) {
+          const ageMinutes = Math.floor((now - cached.timestamp) / 1000 / 60);
+          console.log(`✅ Using cached prices (${ageMinutes}min old, valid for ${Math.floor((cached.expiresAt - now) / 1000 / 60)}min more)`);
+          
           return {
-            data: prices,
+            data: cached.data,
             filters: { country, service },
             cached: true,
-            cacheAge: Math.floor((now - lastPriceFetch) / 1000 / 60) // minutes
+            cacheAge: ageMinutes,
+            cacheKey
           };
         }
       }
@@ -70,6 +80,18 @@ export const fetchPrices = createAsyncThunk(
       const response = await servicesApi.getPrices({ country, service });
       
       if (!response || !response.success) {
+        // If API fails but we have stale cache, return it
+        if (priceCache[cacheKey]) {
+          console.warn('⚠️ API failed, returning stale cached prices');
+          return {
+            data: priceCache[cacheKey].data,
+            filters: { country, service },
+            cached: true,
+            stale: true,
+            cacheKey
+          };
+        }
+        
         const errorMessage = response?.error || 'Failed to fetch prices';
         return rejectWithValue(errorMessage);
       }
@@ -78,10 +100,28 @@ export const fetchPrices = createAsyncThunk(
         data: response.data || {},
         filters: response.filters || { country, service },
         cached: false,
-        fetchTime: now
+        fetchTime: now,
+        cacheKey,
+        expiresAt: now + CACHE_DURATION
       };
     } catch (error: any) {
       console.error('❌ fetchPrices error:', error);
+      
+      // Try to return stale cache on error
+      const state = getState() as { services: ServicesState };
+      const cacheKey = `${country || 'all'}_${service || 'all'}`;
+      
+      if (state.services.priceCache[cacheKey]) {
+        console.warn('⚠️ Exception occurred, returning stale cached prices');
+        return {
+          data: state.services.priceCache[cacheKey].data,
+          filters: { country, service },
+          cached: true,
+          stale: true,
+          cacheKey
+        };
+      }
+      
       return rejectWithValue(error.message || 'Failed to fetch prices');
     }
   }
@@ -93,7 +133,6 @@ const servicesSlice = createSlice({
   reducers: {
     setSelectedCountry: (state, action) => {
       state.selectedCountry = action.payload;
-      // REMOVED: Reset operator when country changes
       console.log('🌍 Selected country changed to:', action.payload);
     },
 
@@ -101,8 +140,6 @@ const servicesSlice = createSlice({
       state.selectedService = action.payload;
       console.log('📱 Selected service changed to:', action.payload);
     },
-
-    // REMOVED: setSelectedOperator - always using "Any Operator" (empty string)
 
     clearError: (state) => {
       state.error = null;
@@ -114,18 +151,60 @@ const servicesSlice = createSlice({
       console.log('🔄 Cleared all selections');
     },
 
-    // REMOVED: resetOperators - no longer needed
+    // Invalidate specific cache entry
+    invalidatePriceCache: (state, action) => {
+      if (action.payload) {
+        // Invalidate specific cache key
+        const cacheKey = action.payload;
+        if (state.priceCache[cacheKey]) {
+          delete state.priceCache[cacheKey];
+          console.log(`♻️ Invalidated cache: ${cacheKey}`);
+        }
+      } else {
+        // Invalidate all cache
+        state.priceCache = {};
+        state.lastPriceFetch = null;
+        console.log('♻️ Invalidated all price cache');
+      }
+    },
 
-    // Force refresh prices (for manual refresh button)
-    invalidatePriceCache: (state) => {
-      state.lastPriceFetch = null;
-      console.log('♻️ Price cache invalidated');
+    // Clean up expired cache entries (call this periodically)
+    cleanExpiredCache: (state) => {
+      const now = Date.now();
+      let cleanedCount = 0;
+      
+      Object.keys(state.priceCache).forEach(key => {
+        if (now > state.priceCache[key].expiresAt) {
+          delete state.priceCache[key];
+          cleanedCount++;
+        }
+      });
+      
+      if (cleanedCount > 0) {
+        console.log(`🧹 Cleaned ${cleanedCount} expired cache entries`);
+      }
+    },
+
+    // Warm up cache with common country/service combinations
+    warmUpCache: (state, action) => {
+      const { country, service, data } = action.payload;
+      const cacheKey = `${country}_${service}`;
+      const now = Date.now();
+      const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+      
+      state.priceCache[cacheKey] = {
+        data,
+        timestamp: now,
+        expiresAt: now + CACHE_DURATION
+      };
+      
+      console.log(`🔥 Warmed up cache for: ${cacheKey}`);
     }
   },
 
   extraReducers: (builder) => {
     builder
-      // Fetch Prices - with caching
+      // Fetch Prices
       .addCase(fetchPrices.pending, (state) => {
         state.pricesLoading = true;
         state.error = null;
@@ -135,13 +214,31 @@ const servicesSlice = createSlice({
         state.pricesLoading = false;
         state.error = null;
         
-        // Only update prices if not from cache
-        if (!action.payload.cached) {
-          state.prices = action.payload.data;
-          state.lastPriceFetch = action.payload.fetchTime || Date.now();
-          console.log('✅ fetchPrices: Fresh data loaded and cached');
+        const { data, cached, cacheKey, fetchTime, expiresAt, stale } = action.payload;
+        
+        if (!cached || stale) {
+          // Update main prices state
+          state.prices = { ...state.prices, ...data };
+          state.lastPriceFetch = fetchTime || Date.now();
+          
+          // Update cache
+          if (cacheKey && expiresAt) {
+            state.priceCache[cacheKey] = {
+              data,
+              timestamp: fetchTime || Date.now(),
+              expiresAt
+            };
+          }
+          
+          if (stale) {
+            console.log('⚠️ fetchPrices: Using stale cache due to API error');
+          } else {
+            console.log('✅ fetchPrices: Fresh data loaded and cached');
+          }
         } else {
-          console.log(`✅ fetchPrices: Using cache (${action.payload.cacheAge} min old)`);
+          // Using valid cache
+          state.prices = { ...state.prices, ...data };
+          console.log(`✅ fetchPrices: Using valid cache (${action.payload.cacheAge}min old)`);
         }
       })
       .addCase(fetchPrices.rejected, (state, action) => {
@@ -157,7 +254,9 @@ export const {
   setSelectedService,
   clearError,
   clearSelections,
-  invalidatePriceCache
+  invalidatePriceCache,
+  cleanExpiredCache,
+  warmUpCache
 } = servicesSlice.actions;
 
 export default servicesSlice.reducer;
